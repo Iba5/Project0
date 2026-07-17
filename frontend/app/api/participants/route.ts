@@ -7,7 +7,7 @@ import { store } from "@/app/api/_store"
 export async function GET(request: Request) {
   return proxyOrFallback({
     request,
-    path: "/participants",
+    path: "/participants/",
     method: "GET",
     fallback: () => NextResponse.json({ items: store.participants }),
   })

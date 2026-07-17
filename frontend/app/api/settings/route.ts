@@ -8,7 +8,7 @@ import type { SettingsProfile } from "@/lib/types"
 export async function GET(request: Request) {
   return proxyOrFallback({
     request,
-    path: "/settings",
+    path: "/settings/",
     method: "GET",
     fallback: () => NextResponse.json(store.settings),
   })
@@ -27,7 +27,7 @@ export async function PUT(request: Request) {
 
   return proxyOrFallback({
     request,
-    path: "/settings",
+    path: "/settings/",
     method: "PUT",
     body,
     fallback: () => {

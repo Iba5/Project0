@@ -7,7 +7,7 @@ import { buildDashboardSummary } from "@/app/api/_store"
 export async function GET(request: Request) {
   return proxyOrFallback({
     request,
-    path: "/dashboard",
+    path: "/dashboard/",
     method: "GET",
     fallback: () => NextResponse.json(buildDashboardSummary()),
   })

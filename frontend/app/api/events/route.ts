@@ -8,7 +8,7 @@ import type { EventRecord } from "@/lib/types"
 export async function GET(request: Request) {
   return proxyOrFallback({
     request,
-    path: "/events",
+    path: "/events/",
     method: "GET",
     fallback: () => NextResponse.json({ items: store.events }),
   })
@@ -39,7 +39,7 @@ export async function POST(request: Request) {
 
   return proxyOrFallback({
     request,
-    path: "/events",
+    path: "/events/",
     method: "POST",
     body: payload,
     fallback: () => {
