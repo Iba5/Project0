@@ -35,6 +35,7 @@ export function DashboardPage() {
   const query = useQuery({
     queryKey: ["dashboard-summary"],
     queryFn: async () => (await api.get<DashboardSummary>("/dashboard")).data,
+    refetchInterval: 10_000,
   })
 
   return (

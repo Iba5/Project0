@@ -10,6 +10,7 @@ import { ErrorState } from "@/components/error-state"
 import { PageHeader } from "@/components/page-header"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { api, getApiError } from "@/lib/api"
@@ -50,17 +51,17 @@ export function PaymentsPage() {
             <p className="text-sm text-muted-foreground">
               Payment records and transaction history.
             </p>
-            <select
-              aria-label="Filter payments by status"
-              className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-              value={status}
-              onChange={(event) => setStatus(event.target.value as typeof status)}
-            >
-              <option>All</option>
-              <option>Pending</option>
-              <option>Successful</option>
-              <option>Failed</option>
-            </select>
+            <Select value={status} onValueChange={(val) => setStatus(val as typeof status)}>
+              <SelectTrigger aria-label="Filter payments by status">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="All">All</SelectItem>
+                <SelectItem value="Pending">Pending</SelectItem>
+                <SelectItem value="Successful">Successful</SelectItem>
+                <SelectItem value="Failed">Failed</SelectItem>
+              </SelectContent>
+            </Select>
           </CardContent>
         </Card>
         {query.isLoading ? <PaymentsSkeleton /> : null}

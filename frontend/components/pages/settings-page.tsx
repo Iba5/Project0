@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api, getApiError } from "@/lib/api"
 import { settingsSchema, type SettingsFormValues } from "@/lib/schemas"
@@ -113,15 +114,16 @@ function SettingsForm({
                 control={control}
                 name="timezone"
                 render={({ field }) => (
-                  <select
-                    {...field}
-                    aria-label="Timezone"
-                    className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-                  >
-                    {timezones.map((tz) => (
-                      <option key={tz}>{tz}</option>
-                    ))}
-                  </select>
+                  <Select value={field.value} onValueChange={field.onChange}>
+                          <SelectTrigger className="w-full" aria-label="Timezone">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {timezones.map((tz) => (
+                              <SelectItem key={tz} value={tz}>{tz}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                 )}
               />
               {errors.timezone ? <p className="text-xs text-destructive">{errors.timezone.message}</p> : null}

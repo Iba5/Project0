@@ -1,3 +1,5 @@
+import { Inbox } from "lucide-react"
+
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 
@@ -17,7 +19,10 @@ export function EmptyState({
 }: EmptyStateProps) {
   return (
     <Card className="border-dashed bg-muted/30">
-      <CardContent className="flex flex-col gap-3 p-6 text-center">
+      <CardContent className="flex flex-col items-center gap-3 p-8 text-center">
+        <div className="rounded-2xl bg-muted/50 p-4">
+          <Inbox className="size-8 text-muted-foreground/60" />
+        </div>
         <div className="space-y-1">
           <h2 className="text-sm font-semibold">{title}</h2>
           <p className="text-sm text-muted-foreground">{message}</p>

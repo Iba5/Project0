@@ -9,6 +9,7 @@ import { Eye, Pencil, Plus, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { AppShell } from "@/components/app-shell"
+import { EmptyState } from "@/components/empty-state"
 import { ErrorState } from "@/components/error-state"
 import { PageHeader } from "@/components/page-header"
 import { Badge } from "@/components/ui/badge"
@@ -17,6 +18,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
@@ -149,15 +151,16 @@ export function EventsPage() {
                       control={control}
                       name="status"
                       render={({ field }) => (
-                        <select
-                          {...field}
-                          aria-label="Event status"
-                          className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
-                        >
-                          <option>Upcoming</option>
-                          <option>Ongoing</option>
-                          <option>Expired</option>
-                        </select>
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <SelectTrigger className="w-full" aria-label="Event status">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Upcoming">Upcoming</SelectItem>
+                            <SelectItem value="Ongoing">Ongoing</SelectItem>
+                            <SelectItem value="Expired">Expired</SelectItem>
+                          </SelectContent>
+                        </Select>
                       )}
                     />
                   </FormField>
@@ -193,6 +196,14 @@ export function EventsPage() {
         />
         {query.isLoading ? <EventsSkeleton /> : null}
         {query.error ? <ErrorState {...getApiError(query.error)} onRetry={() => query.refetch()} /> : null}
+        {!query.isLoading && !query.error && events.length === 0 ? (
+          <EmptyState
+            title="No events yet"
+            message="Create your first competition event to get started."
+            actionLabel="New event"
+            onAction={() => openEditor()}
+          />
+        ) : null}
         {events.length ? (
           <Card className="glass-panel">
             <CardContent className="p-0">

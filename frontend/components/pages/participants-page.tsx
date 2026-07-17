@@ -17,6 +17,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -163,35 +164,29 @@ export function ParticipantsPage() {
                 }}
               />
             </div>
-            <select
-              aria-label="Filter participants by status"
-              className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-              value={status}
-              onChange={(event) => {
-                setStatus(event.target.value as typeof status)
-                setPage(1)
-              }}
-            >
-              <option>All</option>
-              <option>Active</option>
-              <option>Pending</option>
-              <option>Suspended</option>
-            </select>
-            <select
-              aria-label="Filter participants by platform"
-              className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-              value={platform}
-              onChange={(event) => {
-                setPlatform(event.target.value as typeof platform)
-                setPage(1)
-              }}
-            >
-              <option>All</option>
-              <option>TikTok</option>
-              <option>Facebook</option>
-              <option>Instagram</option>
-              <option>YouTube</option>
-            </select>
+            <Select value={status} onValueChange={(val) => { setStatus(val as typeof status); setPage(1) }}>
+              <SelectTrigger aria-label="Filter participants by status">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="All">All</SelectItem>
+                <SelectItem value="Active">Active</SelectItem>
+                <SelectItem value="Pending">Pending</SelectItem>
+                <SelectItem value="Suspended">Suspended</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={platform} onValueChange={(val) => { setPlatform(val as typeof platform); setPage(1) }}>
+              <SelectTrigger aria-label="Filter participants by platform">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="All">All</SelectItem>
+                <SelectItem value="TikTok">TikTok</SelectItem>
+                <SelectItem value="Facebook">Facebook</SelectItem>
+                <SelectItem value="Instagram">Instagram</SelectItem>
+                <SelectItem value="YouTube">YouTube</SelectItem>
+              </SelectContent>
+            </Select>
             <Button type="button" variant="outline" onClick={() => {
               setSearch("")
               setStatus("All")
@@ -297,16 +292,17 @@ export function ParticipantsPage() {
                 control={control}
                 name="platform"
                 render={({ field }) => (
-                  <select
-                    {...field}
-                    aria-label="Platform"
-                    className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
-                  >
-                    <option>TikTok</option>
-                    <option>Facebook</option>
-                    <option>Instagram</option>
-                    <option>YouTube</option>
-                  </select>
+                  <Select value={field.value} onValueChange={field.onChange}>
+                          <SelectTrigger className="w-full" aria-label="Platform">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="TikTok">TikTok</SelectItem>
+                            <SelectItem value="Facebook">Facebook</SelectItem>
+                            <SelectItem value="Instagram">Instagram</SelectItem>
+                            <SelectItem value="YouTube">YouTube</SelectItem>
+                          </SelectContent>
+                        </Select>
                 )}
               />
             </FormField>
@@ -315,15 +311,16 @@ export function ParticipantsPage() {
                 control={control}
                 name="status"
                 render={({ field }) => (
-                  <select
-                    {...field}
-                    aria-label="Status"
-                    className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
-                  >
-                    <option>Active</option>
-                    <option>Pending</option>
-                    <option>Suspended</option>
-                  </select>
+                  <Select value={field.value} onValueChange={field.onChange}>
+                          <SelectTrigger className="w-full" aria-label="Status">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Active">Active</SelectItem>
+                            <SelectItem value="Pending">Pending</SelectItem>
+                            <SelectItem value="Suspended">Suspended</SelectItem>
+                          </SelectContent>
+                        </Select>
                 )}
               />
             </FormField>

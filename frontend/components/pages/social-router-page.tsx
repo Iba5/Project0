@@ -1,7 +1,7 @@
 "use client"
 
-import { useQuery } from "@tanstack/react-query"
-import { RefreshCw, PlugZap } from "lucide-react"
+import { useMutation, useQuery } from "@tanstack/react-query"
+import { PlugZap, Unplug, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 
 import { AppShell } from "@/components/app-shell"
@@ -20,6 +20,19 @@ export function SocialRouterPage() {
   const query = useQuery({
     queryKey: ["social-router"],
     queryFn: async () => (await api.get<{ items: SocialPlatformRecord[] }>("/social-router")).data.items,
+  })
+
+  const toggle = useMutation({
+    mutationFn: async ({ platformId, action }: { platformId: string; action: "connect" | "disconnect" }) =>
+      (await api.patch<{ message: string; item: SocialPlatformRecord }>("/social-router", { platformId, action })).data,
+    onSuccess: async (data) => {
+      toast.success(data.message)
+      await query.refetch()
+    },
+    onError: (error) => {
+      const apiError = getApiError(error)
+      toast.error(apiError.message, apiError.hint ? { description: apiError.hint } : undefined)
+    },
   })
 
   return (
@@ -43,24 +56,48 @@ export function SocialRouterPage() {
         {query.error ? <ErrorState {...getApiError(query.error)} onRetry={() => query.refetch()} /> : null}
         {query.data?.length ? (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {query.data.map((platform) => (
-              <Card key={platform.id} className="glass-panel">
-                <CardHeader className="space-y-2">
-                  <CardTitle>{platform.platform}</CardTitle>
-                  <Badge variant={platform.status === "Connected" ? "default" : platform.status === "Syncing" ? "secondary" : platform.status === "Failed" ? "destructive" : "outline"}>
-                    {platform.status}
-                  </Badge>
-                </CardHeader>
-                <CardContent className="space-y-2 text-sm text-muted-foreground">
-                  <p>{platform.detail}</p>
-                  <p>Last sync: {platform.lastSync}</p>
-                  <div className="inline-flex items-center gap-1.5 rounded-full border border-border/60 px-3 py-1 text-xs text-foreground">
-                    <PlugZap className="size-3.5" />
-                    Connected
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+            {query.data.map((platform) => {
+              const isConnected = platform.status === "Connected" || platform.status === "Syncing"
+              return (
+                <Card key={platform.id} className="glass-panel">
+                  <CardHeader className="space-y-2">
+                    <CardTitle>{platform.platform}</CardTitle>
+                    <Badge variant={platform.status === "Connected" ? "default" : platform.status === "Syncing" ? "secondary" : platform.status === "Failed" ? "destructive" : "outline"}>
+                      {platform.status}
+                    </Badge>
+                  </CardHeader>
+                  <CardContent className="space-y-3 text-sm text-muted-foreground">
+                    <p>{platform.detail}</p>
+                    <p>Last sync: {platform.lastSync}</p>
+                    <Button
+                      type="button"
+                      variant={isConnected ? "outline" : "default"}
+                      size="sm"
+                      className="w-full"
+                      disabled={toggle.isPending}
+                      onClick={() =>
+                        toggle.mutate({
+                          platformId: platform.id,
+                          action: isConnected ? "disconnect" : "connect",
+                        })
+                      }
+                    >
+                      {isConnected ? (
+                        <>
+                          <Unplug className="size-3.5" />
+                          Disconnect
+                        </>
+                      ) : (
+                        <>
+                          <PlugZap className="size-3.5" />
+                          Connect
+                        </>
+                      )}
+                    </Button>
+                  </CardContent>
+                </Card>
+              )
+            })}
           </div>
         ) : (
           <EmptyState title="No social router records" message="Platform connection details will appear here once configured." />
