@@ -359,6 +359,30 @@ class PaymentService:
         self.fraud_service = FraudDetectionService(db)
         self.idempotency_service = IdempotencyService(db)
 
+    def list_payments(self) -> list:
+        """
+        Returns all payment records with contestant names attached,
+        avoiding a per-row lookup by batch-fetching contestants in one query.
+        """
+        payments = self.payment_repo.get_all_ordered_by_date()
+
+        contestant_ids = {p.contestant_id for p in payments if p.contestant_id}
+        contestants = self.part_repo.get_by_ids(contestant_ids) if contestant_ids else []
+        name_by_id = {c.id: c.name for c in contestants}
+
+        return [
+            {
+                "id": p.id,
+                "reference": p.reference,
+                "contestant": name_by_id.get(p.contestant_id, "Unknown"),
+                "amount": f"${p.amount:.2f}",
+                "paymentMethod": p.payment_method,
+                "status": p.status,
+                "date": p.date,
+            }
+            for p in payments
+        ]
+
     def initiate_payment(self, payment_in: PaymentCreate) -> dict:
         """
         Creates a pending local transaction record and simulates a Paynow checkout link redirect.

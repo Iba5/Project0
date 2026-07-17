@@ -73,6 +73,15 @@ class ParticipantRepository(BaseRepository[Participant]):
     def __init__(self, db: Session):
         super().__init__(Participant, db)
 
+    def get_by_ids(self, ids: set) -> List[Participant]:
+        """Batch-fetch multiple participants in a single query, avoiding N+1 lookups."""
+        if not ids:
+            return []
+        query = self.db.query(Participant).filter(Participant.id.in_(ids))
+        if hasattr(Participant, "deleted_at"):
+            query = query.filter(Participant.deleted_at == None)
+        return query.all()
+
     def search_and_filter(
         self, search: Optional[str] = None, status: Optional[ContestantStatus] = None, platform: Optional[PlatformEnum] = None
     ) -> List[Participant]:
@@ -86,6 +95,7 @@ class ParticipantRepository(BaseRepository[Participant]):
         if platform:
             query = query.filter(Participant.platform == platform)
         return query.all()
+    
 
 class PaymentRepository(BaseRepository[Payment]):
     def __init__(self, db: Session):

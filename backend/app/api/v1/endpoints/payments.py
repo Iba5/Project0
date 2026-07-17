@@ -53,5 +53,5 @@ def paynow_callback(
     dependencies=[allow_read_payments]
 )
 def list_payments(db: Session = Depends(get_db)):
-    dashboard_service = DashboardService(db)
-    return dashboard_service.get_summary()["recentPayments"]
+    payment_service = PaymentService(db)
+    return payment_service.list_payments()
