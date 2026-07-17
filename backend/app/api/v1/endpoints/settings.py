@@ -41,7 +41,7 @@ def get_settings(db: Session = Depends(get_db)):
 )
 def update_settings(
     settings_in: SettingsProfileUpdate,
-    current_user: User = Depends(allow_update),
+    current_user: User = allow_update,
     db: Session = Depends(get_db)
 ):
     settings_service = SettingsService(db, user_id=current_user.id)
