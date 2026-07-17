@@ -44,7 +44,7 @@ def get_event(event_id: str, db: Session = Depends(get_db)):
 )
 def create_event(
     event_in: EventCreate,
-    current_user: User = Depends(allow_create),
+    current_user: User = allow_create,
     db: Session = Depends(get_db)
 ):
     event_service = EventService(db, user_id=current_user.id)
@@ -58,7 +58,7 @@ def create_event(
 def update_event(
     event_id: str,
     event_in: EventUpdate,
-    current_user: User = Depends(allow_update),
+    current_user: User = allow_update,
     db: Session = Depends(get_db)
 ):
     event_service = EventService(db, user_id=current_user.id)
@@ -71,7 +71,7 @@ def update_event(
 )
 def delete_event(
     event_id: str,
-    current_user: User = Depends(allow_delete),
+    current_user: User = allow_delete,
     db: Session = Depends(get_db)
 ):
     event_service = EventService(db, user_id=current_user.id)

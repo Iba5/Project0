@@ -47,7 +47,7 @@ def get_participant(part_id: str, db: Session = Depends(get_db)):
 )
 def create_participant(
     part_in: ParticipantCreate,
-    current_user: User = Depends(allow_update),
+    current_user: User = allow_update,
     db: Session = Depends(get_db)
 ):
     part_service = ParticipantService(db, user_id=current_user.id)
@@ -61,7 +61,7 @@ def create_participant(
 def update_status(
     part_id: str,
     status_val: ContestantStatus = Query(..., alias="status"),
-    current_user: User = Depends(allow_update),
+    current_user: User = allow_update,
     db: Session = Depends(get_db)
 ):
     part_service = ParticipantService(db, user_id=current_user.id)
