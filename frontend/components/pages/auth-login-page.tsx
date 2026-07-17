@@ -2,9 +2,12 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useState, type FormEvent } from "react"
+import { useState } from "react"
+import { useForm } from "react-hook-form"
+import { zodResolver } from "@hookform/resolvers/zod"
 import { useMutation } from "@tanstack/react-query"
 import { LockKeyhole, Mail, Sparkles } from "lucide-react"
+import { toast } from "sonner"
 
 import { AuthShell } from "@/components/auth-shell"
 import { Button } from "@/components/ui/button"
@@ -13,28 +16,26 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { api, getApiError } from "@/lib/api"
 import { setAuth } from "@/lib/auth"
+import { loginSchema, type LoginFormValues } from "@/lib/schemas"
 import type { AuthResult } from "@/lib/types"
-import { toast } from "sonner"
 
-type LoginForm = {
-  email: string
-  password: string
-  rememberMe: boolean
-}
-
-// Handles sign in, remembers the admin preference, and routes into the dashboard.
+// Handles sign in with zod-validated form and routes into the dashboard.
 export function AuthLoginPage() {
   const router = useRouter()
-  const [form, setForm] = useState<LoginForm>({
-    email: "",
-    password: "",
-    rememberMe: true,
-  })
   const [googleLoading, setGoogleLoading] = useState(false)
 
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<LoginFormValues>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: { email: "", password: "", rememberMe: true },
+  })
+
   const login = useMutation({
-    mutationFn: async () =>
-      (await api.post<AuthResult>("/auth/login", form)).data,
+    mutationFn: async (values: LoginFormValues) =>
+      (await api.post<AuthResult>("/auth/login", values)).data,
     onSuccess: (data) => {
       setAuth(data)
       toast.success(data.message)
@@ -46,13 +47,7 @@ export function AuthLoginPage() {
     },
   })
 
-  // Sends the login payload to the backend-facing API route.
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    login.mutate()
-  }
-
-  // Starts the Google sign-in handshake through the backend API route.
+  // Starts the Google sign-in process.
   async function handleGoogleSignIn() {
     setGoogleLoading(true)
     try {
@@ -70,9 +65,9 @@ export function AuthLoginPage() {
   return (
     <AuthShell
       title="Sign in to the admin workspace"
-      description="Use your backend-issued JWT to manage events, participants, votes, and payments."
-      asideTitle="Fast route wiring"
-      asideText="The login form already talks to `/api/auth/login`, so your FastAPI backend can drop in later."
+      description="Manage events, participants, votes, and payments from your dashboard."
+      asideTitle="Secure access"
+      asideText="Your administrative workspace for managing the competition platform."
     >
       <Card className="glass-panel border-border/60">
         <CardHeader className="space-y-2">
@@ -92,42 +87,41 @@ export function AuthLoginPage() {
             or use your admin email
             <span className="h-px flex-1 bg-border" />
           </div>
-          <form className="space-y-4" onSubmit={handleSubmit}>
+          <form className="space-y-4" onSubmit={handleSubmit((values) => login.mutate(values))}>
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="login-email">Email</Label>
               <div className="relative">
                 <Mail className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  id="email"
+                  id="login-email"
                   type="email"
                   placeholder="admin@company.com"
                   className="pl-9"
-                  value={form.email}
-                  onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
+                  {...register("email")}
                 />
               </div>
+              {errors.email ? <p className="text-xs text-destructive">{errors.email.message}</p> : null}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="login-password">Password</Label>
               <div className="relative">
                 <LockKeyhole className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  id="password"
+                  id="login-password"
                   type="password"
                   placeholder="••••••••"
                   className="pl-9"
-                  value={form.password}
-                  onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
+                  {...register("password")}
                 />
               </div>
+              {errors.password ? <p className="text-xs text-destructive">{errors.password.message}</p> : null}
             </div>
             <div className="flex items-center justify-between gap-3">
               <label className="flex items-center gap-2 text-sm text-muted-foreground">
                 <input
                   type="checkbox"
-                  checked={form.rememberMe}
-                  onChange={(event) => setForm((current) => ({ ...current, rememberMe: event.target.checked }))}
                   className="size-4 rounded border-border bg-background"
+                  {...register("rememberMe")}
                 />
                 Remember me
               </label>

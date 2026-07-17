@@ -9,7 +9,7 @@ type ProxyOptions = {
   fallback: () => Promise<NextResponse> | NextResponse
 }
 
-// Proxies a request to the backend when configured, otherwise returns the local fallback.
+// Proxies a request to the external service when configured, otherwise returns the local fallback.
 export async function proxyOrFallback({ request, path, method, body, fallback }: ProxyOptions) {
   const baseUrl = process.env.BACKEND_API_URL
 
@@ -58,8 +58,16 @@ export async function proxyOrFallback({ request, path, method, body, fallback }:
 
     return NextResponse.json(payload, { status: response.status })
   } catch (error) {
-    console.error("Proxy Error connecting to FastAPI backend:", error)
-    return fallback()
+    console.error("Proxy Error connecting to external service:", error)
+    const detail =
+      error instanceof Error ? error.message : "An unexpected error occurred while reaching the service."
+    return NextResponse.json(
+      {
+        message: "The service is currently unreachable.",
+        hint: detail,
+      },
+      { status: 503 }
+    )
   }
 }
 

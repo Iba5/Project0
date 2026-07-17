@@ -15,6 +15,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { api, getApiError } from "@/lib/api"
 import type { PaymentRecord } from "@/lib/types"
 
+// Formats a payment's numeric cent value to a locale currency string at render time.
+function formatAmount(payment: PaymentRecord) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: payment.currency || "USD",
+  }).format(payment.amountCents / 100)
+}
+
 // Surfaces payment history with a simple status filter and clear totals.
 export function PaymentsPage() {
   const query = useQuery({
@@ -40,7 +48,7 @@ export function PaymentsPage() {
         <Card className="glass-panel">
           <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-muted-foreground">
-              Payments are read through `/api/payments` so the backend can own all settlement state.
+              Payment records and transaction history.
             </p>
             <select
               aria-label="Filter payments by status"
@@ -76,7 +84,7 @@ export function PaymentsPage() {
                     <TableRow key={payment.id}>
                       <TableCell className="font-medium">{payment.reference}</TableCell>
                       <TableCell>{payment.contestant}</TableCell>
-                      <TableCell>{payment.amount}</TableCell>
+                      <TableCell>{formatAmount(payment)}</TableCell>
                       <TableCell>{payment.paymentMethod}</TableCell>
                       <TableCell>
                         <PaymentBadge status={payment.status} />
@@ -89,7 +97,7 @@ export function PaymentsPage() {
             </CardContent>
           </Card>
         ) : (
-          <EmptyState title="No payments match the filter" message="Use another status or wait for the backend to return more records." />
+          <EmptyState title="No payments match the filter" message="Try a different status filter or check back later." />
         )}
       </div>
     </AppShell>

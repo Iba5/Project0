@@ -2,6 +2,7 @@ import type {
   ActivityRecord,
   DashboardSummary,
   EventRecord,
+  NotificationRecord,
   ParticipantRecord,
   PaymentRecord,
   SettingsProfile,
@@ -82,7 +83,8 @@ export const initialPayments: PaymentRecord[] = [
     id: "pay-001",
     reference: "VOTE-2026-1048",
     contestant: "Mira Patel",
-    amount: "$320.00",
+    amountCents: 32000,
+    currency: "USD",
     paymentMethod: "Stripe",
     status: "Successful",
     date: "2026-07-15T09:18:00Z",
@@ -91,7 +93,8 @@ export const initialPayments: PaymentRecord[] = [
     id: "pay-002",
     reference: "VOTE-2026-1059",
     contestant: "Jordan Lewis",
-    amount: "$140.00",
+    amountCents: 14000,
+    currency: "USD",
     paymentMethod: "PayPal",
     status: "Pending",
     date: "2026-07-15T11:02:00Z",
@@ -100,7 +103,8 @@ export const initialPayments: PaymentRecord[] = [
     id: "pay-003",
     reference: "VOTE-2026-1061",
     contestant: "Anika Sharma",
-    amount: "$255.00",
+    amountCents: 25500,
+    currency: "USD",
     paymentMethod: "Card",
     status: "Failed",
     date: "2026-07-14T18:30:00Z",
@@ -111,7 +115,7 @@ export const initialActivity: ActivityRecord[] = [
   {
     id: "act-001",
     title: "Votes synchronized",
-    detail: "Backend queued 1,250 TikTok votes for the active event.",
+    detail: "Processed 1,250 TikTok votes for the active event.",
     time: "5 minutes ago",
   },
   {
@@ -148,7 +152,7 @@ export const initialSocialStatus: SocialPlatformRecord[] = [
     platform: "Instagram",
     status: "Failed",
     lastSync: "26 minutes ago",
-    detail: "The last payload was rejected by the backend.",
+    detail: "The last payload was rejected during processing.",
   },
   {
     id: "soc-004",
@@ -161,12 +165,39 @@ export const initialSocialStatus: SocialPlatformRecord[] = [
 
 export const initialDashboardSummary: DashboardSummary = {
   activeEvent: "Summer Spotlight 2026",
-  totalParticipants: 84,
+  totalParticipants: initialParticipants.length,
   totalVotes: 145280,
   totalRevenue: "$24,480",
   recentPayments: initialPayments,
   recentActivity: initialActivity,
 }
+
+export const initialNotifications: NotificationRecord[] = [
+  {
+    id: "notif-001",
+    title: "New vote batch synced",
+    detail: "1,250 votes were processed in the active event.",
+    route: "/dashboard",
+    read: false,
+    time: "5 minutes ago",
+  },
+  {
+    id: "notif-002",
+    title: "Payment review needed",
+    detail: "One settlement is pending manual confirmation.",
+    route: "/payments",
+    read: false,
+    time: "18 minutes ago",
+  },
+  {
+    id: "notif-003",
+    title: "Instagram sync failed",
+    detail: "The system should retry the latest social payload.",
+    route: "/social-router",
+    read: true,
+    time: "1 hour ago",
+  },
+]
 
 export const initialSettings: SettingsProfile = {
   companyName: "VibeWave Admin",

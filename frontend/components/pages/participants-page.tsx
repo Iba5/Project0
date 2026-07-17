@@ -1,8 +1,11 @@
 "use client"
 
 import { useMemo, useState, type ReactNode } from "react"
-import { useQuery } from "@tanstack/react-query"
-import { ExternalLink, Filter, Search } from "lucide-react"
+import { useForm, Controller } from "react-hook-form"
+import { zodResolver } from "@hookform/resolvers/zod"
+import { useMutation, useQuery } from "@tanstack/react-query"
+import { ExternalLink, Filter, Pencil, Plus, Search, Trash2 } from "lucide-react"
+import { toast } from "sonner"
 
 import { AppShell } from "@/components/app-shell"
 import { EmptyState } from "@/components/empty-state"
@@ -11,16 +14,28 @@ import { PageHeader } from "@/components/page-header"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { api, getApiError } from "@/lib/api"
+import { participantSchema, type ParticipantFormValues } from "@/lib/schemas"
 import type { ParticipantRecord } from "@/lib/types"
 
 const pageSize = 4
 
-// Lets operators search, filter, and page through contestant records.
+const emptyForm: ParticipantFormValues = {
+  name: "",
+  category: "",
+  platform: "TikTok",
+  videoUrl: "",
+  status: "Pending",
+  votes: 0,
+}
+
+// Lets operators search, filter, page, and CRUD contestant records.
 export function ParticipantsPage() {
   const query = useQuery({
     queryKey: ["participants"],
@@ -31,17 +46,61 @@ export function ParticipantsPage() {
   const [platform, setPlatform] = useState<"All" | ParticipantRecord["platform"]>("All")
   const [page, setPage] = useState(1)
   const [detailOpen, setDetailOpen] = useState(false)
+  const [editorOpen, setEditorOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
   const [selectedParticipant, setSelectedParticipant] = useState<ParticipantRecord | null>(null)
+
+  const {
+    register,
+    handleSubmit,
+    reset,
+    control,
+    formState: { errors },
+  } = useForm<ParticipantFormValues>({
+    resolver: zodResolver(participantSchema),
+    defaultValues: emptyForm,
+  })
+
+  const save = useMutation({
+    mutationFn: async (values: ParticipantFormValues) =>
+      selectedParticipant
+        ? (await api.patch(`/participants/${selectedParticipant.id}`, { ...values, id: selectedParticipant.id })).data
+        : (await api.post("/participants", values)).data,
+    onSuccess: async (data: { message: string }) => {
+      toast.success(data.message || "Participant saved.")
+      setEditorOpen(false)
+      setSelectedParticipant(null)
+      reset(emptyForm)
+      await query.refetch()
+    },
+    onError: (error) => {
+      const apiError = getApiError(error)
+      toast.error(apiError.message, apiError.hint ? { description: apiError.hint } : undefined)
+    },
+  })
+
+  const remove = useMutation({
+    mutationFn: async (id: string) => (await api.delete(`/participants/${id}`)).data,
+    onSuccess: async (data: { message: string }) => {
+      toast.success(data.message || "Participant removed.")
+      setDeleteOpen(false)
+      setSelectedParticipant(null)
+      await query.refetch()
+    },
+    onError: (error) => {
+      const apiError = getApiError(error)
+      toast.error(apiError.message, apiError.hint ? { description: apiError.hint } : undefined)
+    },
+  })
 
   const filtered = useMemo(() => {
     const items = query.data ?? []
-
-    return items.filter((participant) => {
+    return items.filter((p) => {
       const matchesSearch =
-        participant.name.toLowerCase().includes(search.toLowerCase()) ||
-        participant.category.toLowerCase().includes(search.toLowerCase())
-      const matchesStatus = status === "All" || participant.status === status
-      const matchesPlatform = platform === "All" || participant.platform === platform
+        p.name.toLowerCase().includes(search.toLowerCase()) ||
+        p.category.toLowerCase().includes(search.toLowerCase())
+      const matchesStatus = status === "All" || p.status === status
+      const matchesPlatform = platform === "All" || p.platform === platform
       return matchesSearch && matchesStatus && matchesPlatform
     })
   }, [platform, query.data, search, status])
@@ -49,10 +108,31 @@ export function ParticipantsPage() {
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
   const currentItems = filtered.slice((page - 1) * pageSize, page * pageSize)
 
-  // Opens the participant detail drawer for a selected contestant.
   function openDetail(participant: ParticipantRecord) {
     setSelectedParticipant(participant)
     setDetailOpen(true)
+  }
+
+  function openEditor(participant?: ParticipantRecord) {
+    setSelectedParticipant(participant ?? null)
+    reset(
+      participant
+        ? {
+            name: participant.name,
+            category: participant.category,
+            platform: participant.platform,
+            videoUrl: participant.videoUrl,
+            status: participant.status,
+            votes: participant.votes,
+          }
+        : emptyForm
+    )
+    setEditorOpen(true)
+  }
+
+  function openDeleteDialog(participant: ParticipantRecord) {
+    setSelectedParticipant(participant)
+    setDeleteOpen(true)
   }
 
   return (
@@ -62,7 +142,12 @@ export function ParticipantsPage() {
           eyebrow="Contestants"
           title="Participants"
           description="Monitor contestant status, platform, and vote totals with search and filtering."
-          actions={<Badge variant="outline">Pagination enabled</Badge>}
+          actions={
+            <Button type="button" onClick={() => openEditor()}>
+              <Plus className="size-4" />
+              Add participant
+            </Button>
+          }
         />
         <Card className="glass-panel">
           <CardContent className="grid gap-3 p-4 lg:grid-cols-[1.5fr_1fr_1fr_auto]">
@@ -131,7 +216,7 @@ export function ParticipantsPage() {
                     <TableHead>Platform</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Votes</TableHead>
-                    <TableHead className="text-right">Action</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -150,9 +235,17 @@ export function ParticipantsPage() {
                       </TableCell>
                       <TableCell>{participant.votes.toLocaleString()}</TableCell>
                       <TableCell className="text-right">
-                        <Button type="button" variant="ghost" size="icon-sm" onClick={() => openDetail(participant)}>
-                          <ExternalLink className="size-4" />
-                        </Button>
+                        <div className="flex justify-end gap-1">
+                          <Button type="button" variant="ghost" size="icon-sm" onClick={() => openDetail(participant)}>
+                            <ExternalLink className="size-4" />
+                          </Button>
+                          <Button type="button" variant="ghost" size="icon-sm" onClick={() => openEditor(participant)}>
+                            <Pencil className="size-4" />
+                          </Button>
+                          <Button type="button" variant="ghost" size="icon-sm" onClick={() => openDeleteDialog(participant)}>
+                            <Trash2 className="size-4" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -180,6 +273,118 @@ export function ParticipantsPage() {
           </div>
         </div>
       </div>
+
+      {/* ── Create / Edit dialog ── */}
+      <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{selectedParticipant ? "Edit participant" : "Add participant"}</DialogTitle>
+            <DialogDescription>
+              Update contestant information and voting details.
+            </DialogDescription>
+          </DialogHeader>
+          <form className="grid gap-4 sm:grid-cols-2" onSubmit={handleSubmit((v) => save.mutate(v))}>
+            <FormField label="Name">
+              <Input {...register("name")} placeholder="Contestant full name" />
+              {errors.name ? <p className="text-xs text-destructive">{errors.name.message}</p> : null}
+            </FormField>
+            <FormField label="Category">
+              <Input {...register("category")} placeholder="Dance, Singing, Comedy…" />
+              {errors.category ? <p className="text-xs text-destructive">{errors.category.message}</p> : null}
+            </FormField>
+            <FormField label="Platform">
+              <Controller
+                control={control}
+                name="platform"
+                render={({ field }) => (
+                  <select
+                    {...field}
+                    aria-label="Platform"
+                    className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
+                  >
+                    <option>TikTok</option>
+                    <option>Facebook</option>
+                    <option>Instagram</option>
+                    <option>YouTube</option>
+                  </select>
+                )}
+              />
+            </FormField>
+            <FormField label="Status">
+              <Controller
+                control={control}
+                name="status"
+                render={({ field }) => (
+                  <select
+                    {...field}
+                    aria-label="Status"
+                    className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
+                  >
+                    <option>Active</option>
+                    <option>Pending</option>
+                    <option>Suspended</option>
+                  </select>
+                )}
+              />
+            </FormField>
+            <div className="sm:col-span-2">
+              <FormField label="Video URL">
+                <Input {...register("videoUrl")} placeholder="https://tiktok.com/@handle/video/…" />
+                {errors.videoUrl ? <p className="text-xs text-destructive">{errors.videoUrl.message}</p> : null}
+              </FormField>
+            </div>
+            <FormField label="Votes">
+              <Input type="number" min={0} {...register("votes")} />
+              {errors.votes ? <p className="text-xs text-destructive">{errors.votes.message}</p> : null}
+            </FormField>
+            <DialogFooter className="sm:col-span-2">
+              <Button type="submit" disabled={save.isPending}>
+                {save.isPending ? "Saving..." : "Save participant"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete confirmation dialog ── */}
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove participant?</DialogTitle>
+            <DialogDescription>
+              This permanently removes the contestant and their vote history.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedParticipant ? (
+            <div className="space-y-2 rounded-xl border border-border/60 bg-muted/30 p-4 text-sm">
+              <p className="font-medium">{selectedParticipant.name}</p>
+              <p className="text-muted-foreground">
+                {selectedParticipant.category} · {selectedParticipant.platform}
+              </p>
+              <p className="text-muted-foreground">{selectedParticipant.votes.toLocaleString()} votes</p>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setDeleteOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={remove.isPending || !selectedParticipant}
+              onClick={() => {
+                if (selectedParticipant) {
+                  remove.mutate(selectedParticipant.id)
+                }
+              }}
+            >
+              {remove.isPending ? "Removing..." : "Remove participant"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Detail sheet ── */}
       <Sheet open={detailOpen} onOpenChange={setDetailOpen}>
         <SheetContent side="right" className="w-full sm:max-w-md">
           <SheetHeader>
@@ -204,6 +409,32 @@ export function ParticipantsPage() {
                 >
                   {selectedParticipant.videoUrl}
                 </a>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => {
+                    setDetailOpen(false)
+                    openEditor(selectedParticipant)
+                  }}
+                >
+                  <Pencil className="size-4" />
+                  Edit
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  className="flex-1"
+                  onClick={() => {
+                    setDetailOpen(false)
+                    openDeleteDialog(selectedParticipant)
+                  }}
+                >
+                  <Trash2 className="size-4" />
+                  Remove
+                </Button>
               </div>
             </div>
           ) : null}
@@ -238,6 +469,16 @@ function DetailRow({ label, value }: { label: string; value: ReactNode }) {
     <div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 px-3 py-2">
       <span className="text-sm text-muted-foreground">{label}</span>
       <span className="text-sm font-medium">{value}</span>
+    </div>
+  )
+}
+
+// Renders a labeled form field in the participant modal.
+function FormField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      {children}
     </div>
   )
 }

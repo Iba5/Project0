@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 from sqlalchemy.orm import Session
 
@@ -13,13 +13,15 @@ from app.repositories.repositories import (
 from app.core.security import hash_password, verify_password, create_access_token
 from app.schemas.schemas import (
     UserRegister, UserLogin, AuthResult, UserResponse,
-    EventCreate, EventUpdate, ParticipantCreate, PaymentCreate, SettingsProfileUpdate
+    EventCreate, EventUpdate, ParticipantCreate, PaymentCreate, SettingsProfileUpdate,
+    ResetPasswordRequest, AdminInvitationRequest, AdminInvitationResponse, InvalidateAdminRequest
 )
 from app.audit.audit import AuditService
 from app.services.fraud import FraudDetectionService
 from app.services.idempotency import IdempotencyService
 from app.integrations.paynow.paynow import PaynowClient
 from app.exceptions.exceptions import VotingException, NotFoundException, AuthenticationException
+from app.utils.email import email_service
 
 logger = logging.getLogger(__name__)
 
@@ -116,15 +118,188 @@ class AuthService:
         )
 
     def request_password_reset(self, email: str) -> None:
+        """
+        Generate password reset token and send email with reset link.
+        """
         user = self.user_repo.get_by_email(email)
         if user:
-            logger.info(f"Password reset requested for: {email}")
+            # Generate reset token
+            reset_token = str(uuid.uuid4())
+            reset_token_expires = datetime.now(timezone.utc) + timedelta(hours=1)
+            
+            # Update user with reset token
+            user.reset_token = reset_token
+            user.reset_token_expires = reset_token_expires
+            self.user_repo.update()
+            
+            # Send email
+            email_sent = email_service.send_password_reset_email(
+                to_email=user.email,
+                reset_token=reset_token,
+                user_name=user.name
+            )
+            
+            logger.info(f"Password reset requested for: {email}, email sent: {email_sent}")
             AuditService.log_action(
                 db=self.db,
                 action="Password Reset Requested",
                 user_id=user.id,
-                details=f"Reset link requested for {email}"
+                details=f"Reset link requested for {email}, email sent: {email_sent}"
             )
+
+    def reset_password(self, reset_request: ResetPasswordRequest) -> bool:
+        """
+        Reset user password using valid reset token.
+        """
+        user = self.user_repo.get_by_reset_token(reset_request.token)
+        
+        if not user:
+            raise AuthenticationException("Invalid or expired reset token")
+        
+        if user.reset_token_expires and user.reset_token_expires < datetime.now(timezone.utc):
+            raise AuthenticationException("Reset token has expired")
+        
+        # Update password
+        user.hashed_password = hash_password(reset_request.new_password)
+        user.reset_token = None
+        user.reset_token_expires = None
+        self.user_repo.update()
+        
+        logger.info(f"Password reset completed for user: {user.email}")
+        AuditService.log_action(
+            db=self.db,
+            action="Password Reset Completed",
+            user_id=user.id,
+            details=f"Password reset for {user.email}"
+        )
+        
+        return True
+
+    def create_admin_invitation(self, invitation_request: AdminInvitationRequest, inviter_user: User) -> AdminInvitationResponse:
+        """
+        Create admin invitation with token and send email.
+        Only super admins can create other admins.
+        """
+        if inviter_user.role != UserRole.SUPER_ADMIN:
+            raise AuthenticationException("Only super admins can create admin invitations")
+        
+        # Check if user already exists
+        existing_user = self.user_repo.get_by_email(invitation_request.email)
+        if existing_user:
+            raise ValueError("User with this email already exists")
+        
+        # Generate invitation token
+        invitation_token = str(uuid.uuid4())
+        invitation_token_expires = datetime.now(timezone.utc) + timedelta(days=7)
+        
+        # Create temporary user record with invitation token
+        new_user = User(
+            name="Pending",  # Will be set during signup
+            email=invitation_request.email,
+            hashed_password="",  # Will be set during signup
+            role=invitation_request.role,
+            is_active=False,  # Inactive until signup completes
+            invitation_token=invitation_token,
+            invitation_token_expires=invitation_token_expires,
+            invited_by=inviter_user.id
+        )
+        self.user_repo.create(new_user)
+        
+        # Send invitation email
+        invitation_link = f"{email_service.frontend_url}/signup?token={invitation_token}"
+        email_sent = email_service.send_admin_invitation_email(
+            to_email=invitation_request.email,
+            invitation_token=invitation_token,
+            inviter_name=inviter_user.name
+        )
+        
+        logger.info(f"Admin invitation created for: {invitation_request.email}, email sent: {email_sent}")
+        AuditService.log_action(
+            db=self.db,
+            action="Admin Invitation Created",
+            user_id=inviter_user.id,
+            details=f"Invitation sent to {invitation_request.email} with role {invitation_request.role.value}"
+        )
+        
+        return AdminInvitationResponse(
+            email=invitation_request.email,
+            role=invitation_request.role,
+            invitation_link=invitation_link,
+            expires_at=invitation_token_expires
+        )
+
+    def complete_admin_signup(self, token: str, name: str, password: str) -> AuthResult:
+        """
+        Complete admin signup using invitation token.
+        """
+        user = self.user_repo.get_by_invitation_token(token)
+        
+        if not user:
+            raise AuthenticationException("Invalid or expired invitation token")
+        
+        if user.invitation_token_expires and user.invitation_token_expires < datetime.now(timezone.utc):
+            raise AuthenticationException("Invitation token has expired")
+        
+        # Update user with name and password
+        user.name = name
+        user.hashed_password = hash_password(password)
+        user.is_active = True
+        user.invitation_token = None
+        user.invitation_token_expires = None
+        self.user_repo.update()
+        
+        logger.info(f"Admin signup completed for: {user.email}")
+        AuditService.log_action(
+            db=self.db,
+            action="Admin Signup Completed",
+            user_id=user.id,
+            details=f"Admin account activated for {user.email}"
+        )
+        
+        # Generate token and return auth result
+        token_jwt = create_access_token(user.id)
+        return AuthResult(
+            token=token_jwt,
+            user=UserResponse(
+                id=user.id,
+                name=user.name,
+                email=user.email,
+                role=user.role
+            ),
+            message="Account created successfully"
+        )
+
+    def invalidate_admin(self, invalidate_request: InvalidateAdminRequest, current_user: User) -> None:
+        """
+        Invalidate (deactivate) another admin account.
+        Only super admins can invalidate other admins.
+        """
+        if current_user.role != UserRole.SUPER_ADMIN:
+            raise AuthenticationException("Only super admins can invalidate other admins")
+        
+        # Cannot invalidate yourself
+        if invalidate_request.admin_id == current_user.id:
+            raise AuthenticationException("Cannot invalidate your own account")
+        
+        target_user = self.user_repo.get_by_id(invalidate_request.admin_id)
+        if not target_user:
+            raise NotFoundException("Admin not found")
+        
+        # Cannot invalidate other super admins
+        if target_user.role == UserRole.SUPER_ADMIN:
+            raise AuthenticationException("Cannot invalidate super admin accounts")
+        
+        # Deactivate the user
+        target_user.is_active = False
+        self.user_repo.update()
+        
+        logger.info(f"Admin invalidated: {target_user.email} by {current_user.email}")
+        AuditService.log_action(
+            db=self.db,
+            action="Admin Invalidated",
+            user_id=current_user.id,
+            details=f"Admin {target_user.email} was invalidated by {current_user.email}"
+        )
 
 class DashboardService:
     """

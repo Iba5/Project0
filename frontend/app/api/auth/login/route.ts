@@ -25,7 +25,7 @@ export async function POST(request: Request) {
           id: "admin-001",
           name: "Admin User",
           email: body.email,
-          role: body.rememberMe ? "Administrator" : "Editor",
+          role: "Administrator",
         },
       }),
   })

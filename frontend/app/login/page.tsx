@@ -6,7 +6,7 @@ export const metadata: Metadata = {
   title: "Login",
 }
 
-// Renders the login route with backend-connected auth controls.
+// Renders the login route with secure auth controls.
 export default function Page() {
   return <AuthLoginPage />
 }

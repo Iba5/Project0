@@ -4,7 +4,7 @@ import { jsonError, proxyOrFallback } from "@/app/api/_lib/backend"
 import { recordActivity, store, upsertEvent } from "@/app/api/_store"
 import type { EventRecord } from "@/lib/types"
 
-// Returns all events and handles creation when the backend is not yet available.
+// Returns all events and handles creation.
 export async function GET(request: Request) {
   return proxyOrFallback({
     request,
@@ -14,7 +14,7 @@ export async function GET(request: Request) {
   })
 }
 
-// Creates a new event locally or forwards the payload to the backend.
+// Creates a new event.
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as Partial<EventRecord> | null
 

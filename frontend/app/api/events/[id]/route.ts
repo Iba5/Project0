@@ -39,7 +39,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   })
 }
 
-// Removes an event locally or forwards the request to the backend.
+// Removes an event.
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const exists = store.events.some((event) => event.id === id)

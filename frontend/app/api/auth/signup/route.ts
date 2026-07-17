@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 
 import { proxyOrFallback, jsonError } from "@/app/api/_lib/backend"
 
-// Creates a new admin account using the backend or the local mock mode.
+// Creates a new admin account.
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as
     | { name?: string; email?: string; password?: string }

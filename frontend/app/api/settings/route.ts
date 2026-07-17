@@ -14,7 +14,7 @@ export async function GET(request: Request) {
   })
 }
 
-// Saves account settings while preserving a backend-compatible request shape.
+// Saves account settings.
 export async function PUT(request: Request) {
   const body = (await request.json().catch(() => null)) as SettingsProfile | null
 

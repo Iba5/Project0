@@ -20,6 +20,15 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     deleted_at = Column(DateTime, nullable=True) # Soft delete field
+    
+    # Password reset fields
+    reset_token = Column(String, nullable=True, index=True)
+    reset_token_expires = Column(DateTime, nullable=True)
+    
+    # Invitation fields
+    invitation_token = Column(String, nullable=True, unique=True, index=True)
+    invitation_token_expires = Column(DateTime, nullable=True)
+    invited_by = Column(String, nullable=True) # ID of user who sent invitation
 
     audit_logs = relationship("AuditLog", back_populates="user")
 

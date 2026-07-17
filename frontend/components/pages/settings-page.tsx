@@ -1,6 +1,8 @@
 "use client"
 
-import { useState, type FormEvent, type ReactNode } from "react"
+import { useEffect, type ReactNode } from "react"
+import { useForm, Controller } from "react-hook-form"
+import { zodResolver } from "@hookform/resolvers/zod"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { BellRing, Clock3, Save } from "lucide-react"
 import { toast } from "sonner"
@@ -15,11 +17,12 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api, getApiError } from "@/lib/api"
+import { settingsSchema, type SettingsFormValues } from "@/lib/schemas"
 import type { SettingsProfile } from "@/lib/types"
 
 const timezones = ["Asia/Kolkata", "UTC", "Africa/Lagos", "America/New_York", "Europe/London"]
 
-// Lets the admin edit shared preferences that the backend should own.
+// Lets the admin edit shared preferences and platform settings.
 export function SettingsPage() {
   const query = useQuery({
     queryKey: ["settings"],
@@ -27,7 +30,7 @@ export function SettingsPage() {
   })
 
   const save = useMutation({
-    mutationFn: async (updatedForm: SettingsProfile) => {
+    mutationFn: async (updatedForm: SettingsFormValues) => {
       return (await api.put("/settings", updatedForm)).data
     },
     onSuccess: (data: { message: string }) => {
@@ -69,38 +72,59 @@ function SettingsForm({
   isSaving,
 }: {
   initialData: SettingsProfile
-  onSave: (data: SettingsProfile) => void
+  onSave: (data: SettingsFormValues) => void
   isSaving: boolean
 }) {
-  const [form, setForm] = useState<SettingsProfile>(initialData)
+  const {
+    register,
+    handleSubmit,
+    reset,
+    control,
+    watch,
+    setValue,
+    formState: { errors },
+  } = useForm<SettingsFormValues>({
+    resolver: zodResolver(settingsSchema),
+    defaultValues: initialData,
+  })
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    onSave(form)
-  }
+  // Sync form if the query re-fetches with fresh data
+  useEffect(() => {
+    reset(initialData)
+  }, [initialData, reset])
+
+  const notifications = watch("notifications")
 
   return (
     <Card className="glass-panel">
       <CardContent className="grid gap-5 p-5">
-        <form className="grid gap-5" onSubmit={handleSubmit}>
+        <form className="grid gap-5" onSubmit={handleSubmit(onSave)}>
           <div className="grid gap-4 md:grid-cols-2">
             <Field label="Company name">
-              <Input value={form.companyName} onChange={(event) => setForm({ ...form, companyName: event.target.value })} />
+              <Input id="settings-company" {...register("companyName")} />
+              {errors.companyName ? <p className="text-xs text-destructive">{errors.companyName.message}</p> : null}
             </Field>
             <Field label="Support email">
-              <Input type="email" value={form.supportEmail} onChange={(event) => setForm({ ...form, supportEmail: event.target.value })} />
+              <Input id="settings-email" type="email" {...register("supportEmail")} />
+              {errors.supportEmail ? <p className="text-xs text-destructive">{errors.supportEmail.message}</p> : null}
             </Field>
             <Field label="Timezone">
-              <select
-                aria-label="Timezone"
-                className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-                value={form.timezone}
-                onChange={(event) => setForm({ ...form, timezone: event.target.value })}
-              >
-                {timezones.map((timezone) => (
-                  <option key={timezone}>{timezone}</option>
-                ))}
-              </select>
+              <Controller
+                control={control}
+                name="timezone"
+                render={({ field }) => (
+                  <select
+                    {...field}
+                    aria-label="Timezone"
+                    className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
+                  >
+                    {timezones.map((tz) => (
+                      <option key={tz}>{tz}</option>
+                    ))}
+                  </select>
+                )}
+              />
+              {errors.timezone ? <p className="text-xs text-destructive">{errors.timezone.message}</p> : null}
             </Field>
           </div>
           <div className="grid gap-3">
@@ -111,33 +135,18 @@ function SettingsForm({
             <div className="grid gap-3 md:grid-cols-3">
               <ToggleButton
                 label="Email"
-                active={form.notifications.email}
-                onClick={() =>
-                  setForm({
-                    ...form,
-                    notifications: { ...form.notifications, email: !form.notifications.email },
-                  })
-                }
+                active={notifications.email}
+                onClick={() => setValue("notifications.email", !notifications.email)}
               />
               <ToggleButton
                 label="SMS"
-                active={form.notifications.sms}
-                onClick={() =>
-                  setForm({
-                    ...form,
-                    notifications: { ...form.notifications, sms: !form.notifications.sms },
-                  })
-                }
+                active={notifications.sms}
+                onClick={() => setValue("notifications.sms", !notifications.sms)}
               />
               <ToggleButton
                 label="Marketing"
-                active={form.notifications.marketing}
-                onClick={() =>
-                  setForm({
-                    ...form,
-                    notifications: { ...form.notifications, marketing: !form.notifications.marketing },
-                  })
-                }
+                active={notifications.marketing}
+                onClick={() => setValue("notifications.marketing", !notifications.marketing)}
               />
             </div>
           </div>

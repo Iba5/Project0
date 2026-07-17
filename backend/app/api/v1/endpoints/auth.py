@@ -1,9 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.services.services import AuthService
-from app.schemas.schemas import UserRegister, UserLogin, AuthResult, ForgotPasswordRequest
+from app.schemas.schemas import (
+    UserRegister, UserLogin, AuthResult, ForgotPasswordRequest, 
+    ResetPasswordRequest, AdminInvitationRequest, AdminInvitationResponse, 
+    InvalidateAdminRequest
+)
 from app.api.v1.dependencies import get_current_active_user
 from app.models.models import User
 
@@ -48,12 +52,77 @@ def logout(request: Request, current_user: User = Depends(get_current_active_use
 @router.post(
     "/forgot-password",
     summary="Forgot Password request",
-    description="Submits a password reset request which logs the audit action."
+    description="Submits a password reset request which sends an email with reset link."
 )
 def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
     auth_service = AuthService(db)
     auth_service.request_password_reset(req.email)
-    return {"message": "If the email is registered, a password reset link has been dispatched."}
+    return {"message": "If the email is registered, a password reset link has been sent to your email."}
+
+@router.post(
+    "/reset-password",
+    summary="Reset Password",
+    description="Reset password using valid reset token from email."
+)
+def reset_password(reset_request: ResetPasswordRequest, db: Session = Depends(get_db)):
+    auth_service = AuthService(db)
+    try:
+        auth_service.reset_password(reset_request)
+        return {"message": "Password reset successfully. You can now login with your new password."}
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+@router.post(
+    "/invite-admin",
+    response_model=AdminInvitationResponse,
+    summary="Invite Admin (Super Admin only)",
+    description="Create admin invitation with token and send email. Only super admins can use this endpoint."
+)
+def invite_admin(
+    invitation_request: AdminInvitationRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    auth_service = AuthService(db)
+    try:
+        return auth_service.create_admin_invitation(invitation_request, current_user)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+@router.post(
+    "/complete-signup",
+    response_model=AuthResult,
+    summary="Complete Admin Signup",
+    description="Complete admin signup using invitation token."
+)
+def complete_signup(
+    token: str = Query(..., description="Invitation token from email"),
+    name: str = Query(..., description="Admin name"),
+    password: str = Query(..., description="Admin password"),
+    db: Session = Depends(get_db)
+):
+    auth_service = AuthService(db)
+    try:
+        return auth_service.complete_admin_signup(token, name, password)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+@router.post(
+    "/invalidate-admin",
+    summary="Invalidate Admin (Super Admin only)",
+    description="Invalidate (deactivate) another admin account. Only super admins can use this endpoint."
+)
+def invalidate_admin(
+    invalidate_request: InvalidateAdminRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    auth_service = AuthService(db)
+    try:
+        auth_service.invalidate_admin(invalidate_request, current_user)
+        return {"message": "Admin account invalidated successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 @router.get(
     "/google",

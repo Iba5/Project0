@@ -15,7 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { api, getApiError } from "@/lib/api"
 import type { SocialPlatformRecord } from "@/lib/types"
 
-// Shows the backend-managed sync status of each social media connector.
+// Shows the sync status of each social media connector.
 export function SocialRouterPage() {
   const query = useQuery({
     queryKey: ["social-router"],
@@ -28,7 +28,7 @@ export function SocialRouterPage() {
         <PageHeader
           eyebrow="Synchronization"
           title="Social Router"
-          description="Review the sync state for TikTok, Facebook, Instagram, and YouTube without exposing backend internals."
+          description="Review the sync state for TikTok, Facebook, Instagram, and YouTube."
           actions={
             <Button type="button" variant="outline" onClick={() => {
               query.refetch()
@@ -56,14 +56,14 @@ export function SocialRouterPage() {
                   <p>Last sync: {platform.lastSync}</p>
                   <div className="inline-flex items-center gap-1.5 rounded-full border border-border/60 px-3 py-1 text-xs text-foreground">
                     <PlugZap className="size-3.5" />
-                    Backend owned
+                    Connected
                   </div>
                 </CardContent>
               </Card>
             ))}
           </div>
         ) : (
-          <EmptyState title="No social router records" message="The backend will populate platform connection details once it is wired up." />
+          <EmptyState title="No social router records" message="Platform connection details will appear here once configured." />
         )}
       </div>
     </AppShell>

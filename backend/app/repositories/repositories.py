@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import List, Optional, Type, TypeVar, Generic
 from sqlalchemy.orm import Session
 from app.models.models import User, Event, Participant, Payment, Activity, SocialPlatform, Setting, VoteTransaction, AuditLog
-from app.enums.enums import EventStatus, ContestantStatus, SocialPlatform as PlatformEnum
+from app.enums.enums import EventStatus, ContestantStatus, SocialPlatform as PlatformEnum, UserRole
 
 T = TypeVar("T")
 
@@ -57,6 +57,26 @@ class UserRepository(BaseRepository[User]):
         if hasattr(User, "deleted_at"):
             query = query.filter(User.deleted_at == None)
         return query.first()
+
+    def get_by_reset_token(self, token: str) -> Optional[User]:
+        query = self.db.query(User).filter(User.reset_token == token)
+        if hasattr(User, "deleted_at"):
+            query = query.filter(User.deleted_at == None)
+        return query.first()
+
+    def get_by_invitation_token(self, token: str) -> Optional[User]:
+        query = self.db.query(User).filter(User.invitation_token == token)
+        return query.first()
+
+    def get_all_active_admins(self) -> List[User]:
+        """Get all active admin users for super admin management."""
+        query = self.db.query(User).filter(
+            User.role.in_([UserRole.ADMIN, UserRole.MODERATOR]),
+            User.is_active == True
+        )
+        if hasattr(User, "deleted_at"):
+            query = query.filter(User.deleted_at == None)
+        return query.all()
 
 class EventRepository(BaseRepository[Event]):
     def __init__(self, db: Session):

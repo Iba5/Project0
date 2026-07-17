@@ -6,7 +6,7 @@ export const metadata: Metadata = {
   title: "Forgot Password",
 }
 
-// Renders the password recovery route with a backend-safe request flow.
+// Renders the password recovery route with a secure request flow.
 export default function Page() {
   return <ForgotPasswordPage />
 }

@@ -22,6 +22,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { api, getApiError } from "@/lib/api"
 import type { DashboardSummary, PaymentRecord } from "@/lib/types"
 
+// Formats a payment's numeric cent value to a locale currency string at render time.
+function formatAmount(payment: PaymentRecord) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: payment.currency || "USD",
+  }).format(payment.amountCents / 100)
+}
+
 // Fetches the dashboard overview and renders summary, activity, and payments.
 export function DashboardPage() {
   const query = useQuery({
@@ -39,7 +47,7 @@ export function DashboardPage() {
           actions={
             <Badge variant="outline" className="gap-1.5 px-3 py-1.5 text-xs">
               <TrendingUp className="size-3.5" />
-              Live backend bridge
+              Live data
             </Badge>
           }
         />
@@ -73,7 +81,7 @@ function DashboardContent({ data }: { data: DashboardSummary }) {
         <MetricCard
           title="Total Votes"
           value={data.totalVotes.toLocaleString()}
-          description="Votes captured by the backend"
+          description="Total votes recorded"
           icon={<Vote className="size-4" />}
         />
         <MetricCard
@@ -104,7 +112,7 @@ function DashboardContent({ data }: { data: DashboardSummary }) {
                     <TableRow key={payment.id}>
                       <TableCell className="font-medium">{payment.reference}</TableCell>
                       <TableCell>{payment.contestant}</TableCell>
-                      <TableCell>{payment.amount}</TableCell>
+                      <TableCell>{formatAmount(payment)}</TableCell>
                       <TableCell>
                         <PaymentStatusBadge status={payment.status} />
                       </TableCell>
@@ -115,7 +123,7 @@ function DashboardContent({ data }: { data: DashboardSummary }) {
             ) : (
               <EmptyState
                 title="No payments yet"
-                message="Once the backend starts emitting payment history, the latest records will appear here."
+                message="Payment records will appear here once transactions are processed."
               />
             )}
           </CardContent>
@@ -144,7 +152,7 @@ function DashboardContent({ data }: { data: DashboardSummary }) {
             ) : (
               <EmptyState
                 title="No activity recorded"
-                message="Recent backend events will appear here after the API is connected."
+                message="Recent activity will appear here as events occur."
               />
             )}
           </CardContent>

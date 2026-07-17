@@ -41,6 +41,23 @@ class AuthResult(CamelModel):
 class ForgotPasswordRequest(CamelModel):
     email: EmailStr
 
+class ResetPasswordRequest(CamelModel):
+    token: str
+    new_password: str
+
+class AdminInvitationRequest(CamelModel):
+    email: EmailStr
+    role: UserRole = UserRole.ADMIN
+
+class AdminInvitationResponse(CamelModel):
+    email: str
+    role: UserRole
+    invitation_link: str
+    expires_at: datetime
+
+class InvalidateAdminRequest(CamelModel):
+    admin_id: str
+
 # --- Event Schemas ---
 
 class EventBase(CamelModel):

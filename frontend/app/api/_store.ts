@@ -1,12 +1,13 @@
 import {
   initialActivity,
   initialEvents,
+  initialNotifications,
   initialParticipants,
   initialPayments,
   initialSettings,
   initialSocialStatus,
 } from "@/lib/mock-data"
-import type { ActivityRecord, EventRecord, SettingsProfile, SocialPlatformRecord } from "@/lib/types"
+import type { ActivityRecord, EventRecord, NotificationRecord, ParticipantRecord, SettingsProfile, SocialPlatformRecord } from "@/lib/types"
 
 export const store = {
   events: structuredClone(initialEvents),
@@ -15,6 +16,7 @@ export const store = {
   activity: structuredClone(initialActivity),
   social: structuredClone(initialSocialStatus),
   settings: structuredClone(initialSettings),
+  notifications: structuredClone(initialNotifications),
 }
 
 // Updates a stored event record and keeps the list ordered by start date.
@@ -30,7 +32,20 @@ export function upsertEvent(input: EventRecord) {
   return input
 }
 
-// Persists a simple settings payload for the mock backend mode.
+// Updates or inserts a participant record into the local store.
+export function upsertParticipant(input: ParticipantRecord) {
+  const index = store.participants.findIndex((p) => p.id === input.id)
+
+  if (index >= 0) {
+    store.participants[index] = input
+    return input
+  }
+
+  store.participants.unshift(input)
+  return input
+}
+
+// Persists a simple settings payload for the local storage mode.
 export function updateSettings(input: SettingsProfile) {
   store.settings = input
   return store.settings
@@ -62,8 +77,7 @@ export function buildDashboardSummary() {
   const activeEvent = store.events.find((event) => event.status === "Ongoing") ?? store.events[0]
   const totalVotes = store.participants.reduce((sum, participant) => sum + participant.votes, 0)
   const totalRevenue = store.payments.reduce((sum, payment) => {
-    const amount = Number.parseFloat(payment.amount.replace(/[^0-9.]/g, ""))
-    return sum + (Number.isFinite(amount) ? amount : 0)
+    return sum + (Number.isFinite(payment.amountCents) ? payment.amountCents / 100 : 0)
   }, 0)
 
   return {

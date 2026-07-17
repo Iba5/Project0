@@ -43,7 +43,8 @@ export type PaymentRecord = {
   id: string
   reference: string
   contestant: string
-  amount: string
+  amountCents: number
+  currency: string
   paymentMethod: string
   status: PaymentStatus
   date: string
@@ -86,4 +87,13 @@ export type SettingsProfile = {
     sms: boolean
     marketing: boolean
   }
+}
+
+export type NotificationRecord = {
+  id: string
+  title: string
+  detail: string
+  route: string
+  read: boolean
+  time: string
 }

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 
 import { proxyOrFallback, jsonError } from "@/app/api/_lib/backend"
 
-// Starts the password reset flow without exposing backend implementation details.
+// Starts the password reset flow.
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as { email?: string } | null
 

@@ -1,7 +1,9 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import type { FormEvent, ReactNode } from "react"
+import type { ReactNode } from "react"
+import { useForm, Controller } from "react-hook-form"
+import { zodResolver } from "@hookform/resolvers/zod"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { Eye, Pencil, Plus, Trash2 } from "lucide-react"
 import { toast } from "sonner"
@@ -19,11 +21,10 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { api, getApiError } from "@/lib/api"
+import { eventSchema, type EventFormValues } from "@/lib/schemas"
 import type { EventRecord } from "@/lib/types"
 
-type EventForm = Omit<EventRecord, "id">
-
-const emptyForm: EventForm = {
+const emptyForm: EventFormValues = {
   name: "",
   description: "",
   banner: "",
@@ -42,18 +43,28 @@ export function EventsPage() {
   const [viewerOpen, setViewerOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [selectedEvent, setSelectedEvent] = useState<EventRecord | null>(null)
-  const [form, setForm] = useState<EventForm>(emptyForm)
+
+  const {
+    register,
+    handleSubmit,
+    reset,
+    control,
+    formState: { errors },
+  } = useForm<EventFormValues>({
+    resolver: zodResolver(eventSchema),
+    defaultValues: emptyForm,
+  })
 
   const save = useMutation({
-    mutationFn: async () =>
+    mutationFn: async (values: EventFormValues) =>
       selectedEvent
-        ? (await api.put(`/events/${selectedEvent.id}`, { ...form, id: selectedEvent.id })).data
-        : (await api.post("/events", form)).data,
+        ? (await api.put(`/events/${selectedEvent.id}`, { ...values, id: selectedEvent.id })).data
+        : (await api.post("/events", values)).data,
     onSuccess: async (data: { message: string }) => {
       toast.success(data.message || "Event saved.")
       setEditorOpen(false)
       setSelectedEvent(null)
-      setForm(emptyForm)
+      reset(emptyForm)
       await query.refetch()
     },
     onError: (error) => {
@@ -78,10 +89,10 @@ export function EventsPage() {
 
   const events = useMemo(() => query.data ?? [], [query.data])
 
-  // Opens the editor with either a blank form or the selected record's values.
+  // Opens the editor pre-filled with the selected record's values or blank.
   function openEditor(event?: EventRecord) {
     setSelectedEvent(event ?? null)
-    setForm(
+    reset(
       event
         ? {
             name: event.name,
@@ -96,22 +107,14 @@ export function EventsPage() {
     setEditorOpen(true)
   }
 
-  // Opens a read-only viewer for one event record.
   function openViewer(event: EventRecord) {
     setSelectedEvent(event)
     setViewerOpen(true)
   }
 
-  // Opens the confirmation dialog for a selected event record.
   function openDeleteDialog(event: EventRecord) {
     setSelectedEvent(event)
     setDeleteOpen(true)
-  }
-
-  // Saves the current event form through the backend-facing API route.
-  function handleSave(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    save.mutate()
   }
 
   return (
@@ -133,56 +136,49 @@ export function EventsPage() {
                 <DialogHeader>
                   <DialogTitle>{selectedEvent ? "Edit event" : "Create event"}</DialogTitle>
                   <DialogDescription>
-                    Keep the backend record aligned with the dashboard schedule.
+                    Update event details and schedule information.
                   </DialogDescription>
                 </DialogHeader>
-                <form className="grid gap-4 sm:grid-cols-2" onSubmit={handleSave}>
+                <form className="grid gap-4 sm:grid-cols-2" onSubmit={handleSubmit((v) => save.mutate(v))}>
                   <FormField label="Name">
-                    <Input
-                      value={form.name}
-                      onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-                    />
+                    <Input {...register("name")} />
+                    {errors.name ? <p className="text-xs text-destructive">{errors.name.message}</p> : null}
                   </FormField>
                   <FormField label="Status">
-                    <select
-                      aria-label="Event status"
-                      className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
-                      value={form.status}
-                      onChange={(event) => setForm((current) => ({ ...current, status: event.target.value as EventForm["status"] }))}
-                    >
-                      <option>Upcoming</option>
-                      <option>Ongoing</option>
-                      <option>Expired</option>
-                    </select>
+                    <Controller
+                      control={control}
+                      name="status"
+                      render={({ field }) => (
+                        <select
+                          {...field}
+                          aria-label="Event status"
+                          className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
+                        >
+                          <option>Upcoming</option>
+                          <option>Ongoing</option>
+                          <option>Expired</option>
+                        </select>
+                      )}
+                    />
                   </FormField>
                   <FormField label="Start date">
-                    <Input
-                      type="date"
-                      value={form.startDate}
-                      onChange={(event) => setForm((current) => ({ ...current, startDate: event.target.value }))}
-                    />
+                    <Input type="date" {...register("startDate")} />
+                    {errors.startDate ? <p className="text-xs text-destructive">{errors.startDate.message}</p> : null}
                   </FormField>
                   <FormField label="End date">
-                    <Input
-                      type="date"
-                      value={form.endDate}
-                      onChange={(event) => setForm((current) => ({ ...current, endDate: event.target.value }))}
-                    />
+                    <Input type="date" {...register("endDate")} />
+                    {errors.endDate ? <p className="text-xs text-destructive">{errors.endDate.message}</p> : null}
                   </FormField>
                   <div className="sm:col-span-2">
                     <FormField label="Banner URL">
-                      <Input
-                        value={form.banner}
-                        onChange={(event) => setForm((current) => ({ ...current, banner: event.target.value }))}
-                      />
+                      <Input {...register("banner")} />
+                      {errors.banner ? <p className="text-xs text-destructive">{errors.banner.message}</p> : null}
                     </FormField>
                   </div>
                   <div className="sm:col-span-2">
                     <FormField label="Description">
-                      <Textarea
-                        value={form.description}
-                        onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
-                      />
+                      <Textarea {...register("description")} />
+                      {errors.description ? <p className="text-xs text-destructive">{errors.description.message}</p> : null}
                     </FormField>
                   </div>
                   <DialogFooter className="sm:col-span-2">

@@ -13,7 +13,7 @@ type ErrorStateProps = {
 
 // Displays a readable error message with a clear retry action for users.
 export function ErrorState({
-  title = "We could not load this section",
+  title = "Unable to load content",
   message,
   hint,
   actionLabel = "Try again",

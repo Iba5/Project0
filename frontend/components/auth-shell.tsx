@@ -47,9 +47,9 @@ export function AuthShell({
             </Card>
             <Card className="glass-panel border-border/60">
               <CardContent className="p-4">
-                <p className="text-sm font-medium">Backend ready</p>
+                <p className="text-sm font-medium">Secure authentication</p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  The auth forms call `/api/auth/*` so you can wire JWT and Google OAuth later without changing the UI.
+                  Your account is protected with enterprise-grade security.
                 </p>
               </CardContent>
             </Card>

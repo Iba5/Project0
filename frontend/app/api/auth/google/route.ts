@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 
 import { proxyOrFallback } from "@/app/api/_lib/backend"
 
-// Starts the Google OAuth handoff through the backend route when available.
+// Starts the Google OAuth handoff.
 export async function GET(request: Request) {
   return proxyOrFallback({
     request,
