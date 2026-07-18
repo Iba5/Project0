@@ -29,8 +29,9 @@ class BaseRepository(Generic[T]):
 
     def _apply_soft_delete(self, query):
         """Apply soft-delete filter if model supports it."""
-        if hasattr(self.model, "deleted_at"):
-            query = query.filter(self.model.deleted_at == None)
+        deleted_at = getattr(self.model, "deleted_at", None)
+        if deleted_at is not None:
+            query = query.filter(deleted_at.is_(None))
         return query
 
     def _base_query(self):
@@ -82,13 +83,13 @@ class UserRepository(BaseRepository[User]):
     def get_by_email(self, email: str) -> Optional[User]:
         query = self.db.query(User).filter(User.email == email)
         if hasattr(User, "deleted_at"):
-            query = query.filter(User.deleted_at == None)
+            query = query.filter(User.deleted_at.is_(None))
         return query.first()
 
     def get_by_reset_token(self, token: str) -> Optional[User]:
         query = self.db.query(User).filter(User.reset_token == token)
         if hasattr(User, "deleted_at"):
-            query = query.filter(User.deleted_at == None)
+            query = query.filter(User.deleted_at.is_(None))
         return query.first()
 
     def get_by_invitation_token(self, token: str) -> Optional[User]:
@@ -99,10 +100,10 @@ class UserRepository(BaseRepository[User]):
         """Get all active admin users for super admin management."""
         query = self.db.query(User).filter(
             User.role.in_([UserRole.ADMIN, UserRole.MODERATOR]),
-            User.is_active == True
+            User.is_active.is_(True)
         )
         if hasattr(User, "deleted_at"):
-            query = query.filter(User.deleted_at == None)
+            query = query.filter(User.deleted_at.is_(None))
         return query.all()
 
 
@@ -112,15 +113,15 @@ class CompetitionRepository(BaseRepository[Competition]):
 
     def get_active_competition(self) -> Optional[Competition]:
         """Fetch the currently active competition."""
-        query = self.db.query(Competition).filter(Competition.is_active == True)
+        query = self.db.query(Competition).filter(Competition.is_active.is_(True))
         if hasattr(Competition, "deleted_at"):
-            query = query.filter(Competition.deleted_at == None)
+            query = query.filter(Competition.deleted_at.is_(None))
         return query.first()
 
     def get_by_status(self, status: CompetitionStatus) -> List[Competition]:
         query = self.db.query(Competition).filter(Competition.status == status)
         if hasattr(Competition, "deleted_at"):
-            query = query.filter(Competition.deleted_at == None)
+            query = query.filter(Competition.deleted_at.is_(None))
         return query.all()
 
 
@@ -132,7 +133,7 @@ class EventRepository(BaseRepository[Event]):
         # Fetch first ongoing voting event
         query = self.db.query(Event).filter(Event.status == EventStatus.VOTING_OPEN)
         if hasattr(Event, "deleted_at"):
-            query = query.filter(Event.deleted_at == None)
+            query = query.filter(Event.deleted_at.is_(None))
         return query.first()
 
 
@@ -146,7 +147,7 @@ class ParticipantRepository(BaseRepository[Participant]):
             return []
         query = self.db.query(Participant).filter(Participant.id.in_(ids))
         if hasattr(Participant, "deleted_at"):
-            query = query.filter(Participant.deleted_at == None)
+            query = query.filter(Participant.deleted_at.is_(None))
         return query.all()
 
     def _filtered_query(self, search=None, status=None, platform=None, competition_id=None):
@@ -185,7 +186,7 @@ class ParticipantRepository(BaseRepository[Participant]):
             Participant.status == ContestantStatus.APPROVED
         )
         if hasattr(Participant, "deleted_at"):
-            query = query.filter(Participant.deleted_at == None)
+            query = query.filter(Participant.deleted_at.is_(None))
         return query.order_by(Participant.votes.desc()).all()
 
 

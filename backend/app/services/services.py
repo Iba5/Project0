@@ -57,14 +57,20 @@ class AuthService:
             raise ValidationException("Email already registered.")
 
         hashed = hash_password(user_in.password)
+
+        # First person to ever register becomes Super Admin. Everyone after that
+        # gets a regular Admin role.
+        is_first_user = self.user_repo.count_all() == 0
+        role = UserRole.SUPER_ADMIN if is_first_user else UserRole.ADMIN
+
         new_user = User(
             name=user_in.name,
             email=user_in.email,
             hashed_password=hashed,
-            role=UserRole.ADMIN
+            role=role
         )
         self.user_repo.create(new_user)
-        
+
         AuditService.log_action(
             db=self.db,
             action="Admin Registered",
@@ -76,9 +82,9 @@ class AuthService:
         return AuthResult(
             token=token,
             user=UserResponse(
-                id=new_user.id,
-                name=new_user.name,
-                email=new_user.email,
+                id=str(new_user.id),
+                name=str(new_user.name),
+                email=str(new_user.email),
                 role=new_user.role
             ),
             message="Registration successful"
