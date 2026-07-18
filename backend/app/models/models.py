@@ -62,6 +62,10 @@ class Event(Base):
     allowed_categories = Column(String, default="Singing,Dancing,Comedy")
     require_contestant_approval = Column(Boolean, default=True)
 
+    # FIX 1: Reverse relationship so we can navigate from an Event to its
+    # contestants when computing vote/pricing rules.
+    participants = relationship("Participant", back_populates="event")
+
 class Participant(Base):
     """
     Contestant in a competition who receives votes.
@@ -78,6 +82,13 @@ class Participant(Base):
     votes = Column(Integer, default=0)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     deleted_at = Column(DateTime, nullable=True) # Soft delete field
+
+    # FIX 1: Link each contestant to the event they belong to so vote-pricing rules
+    # can be resolved deterministically when a payment callback arrives. Nullable
+    # so legacy rows and the existing create flow keep working; populated by the
+    # service layer at creation time whenever an event context is known.
+    event_id = Column(String, ForeignKey("events.id"), nullable=True, index=True)
+    event = relationship("Event", back_populates="participants")
 
     payments = relationship("Payment", back_populates="contestant")
     vote_transactions = relationship("VoteTransaction", back_populates="contestant")
@@ -96,6 +107,13 @@ class Payment(Base):
     status = Column(Enum(PaymentStatus), default=PaymentStatus.CREATED, nullable=False)
     date = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    # FIX 1: Link each payment to the event whose pricing rules were in effect
+    # at checkout time. This lets the Paynow callback compute the exact number
+    # of votes to award using event.vote_price and event.votes_per_payment
+    # instead of naively truncating the currency amount.
+    event_id = Column(String, ForeignKey("events.id"), nullable=True, index=True)
+    event = relationship("Event")
 
     contestant = relationship("Participant", back_populates="payments")
     vote_transaction = relationship("VoteTransaction", uselist=False, back_populates="payment")
@@ -168,3 +186,51 @@ class Setting(Base):
     email_notifications = Column(Boolean, default=True)
     sms_notifications = Column(Boolean, default=False)
     marketing_notifications = Column(Boolean, default=False)
+
+
+class RevokedToken(Base):
+    """
+    FIX 6: JWT blocklist. Every logout writes the token's `jti` (JWT ID) here.
+    The auth dependency rejects any token whose `jti` appears in this table and
+    whose expiry has not yet passed, so a logged-out (or stolen-then-revoked)
+    token can no longer be used even though its signature is still valid.
+
+    Rows are pruned automatically once their `expires_at` is in the past, which
+    keeps the table bounded by the number of active tokens (token lifetime).
+    """
+    __tablename__ = "revoked_tokens"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    # `jti` is the unique JWT ID minted in create_access_token(); uniqueness here
+    # means revoking the same token twice is a harmless no-op.
+    jti = Column(String, unique=True, index=True, nullable=False)
+    user_id = Column(String, ForeignKey("users.id"), nullable=True)
+    # When the JWT itself expires. We keep the row only while the token could
+    # still be presented; afterwards it is safe to delete.
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class RateLimitBucket(Base):
+    """
+    FIX 4: Distributed, cross-worker rate-limiting state.
+
+    Replaces the old process-local in-memory dict, which (a) reset limits per
+    Uvicorn worker and (b) leaked memory by never pruning expired IPs. Each
+    client IP gets one row; the middleware updates request_count and window_start
+    atomically so concurrent workers see a single, consistent counter.
+
+    Note: for very high-traffic deployments a Redis backend would be preferable;
+    this DB-backed implementation is correct for the admin app's traffic profile
+    and works with the existing PostgreSQL/SQLite stack.
+    """
+    __tablename__ = "rate_limit_buckets"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    # The client IP being throttled. Unique so upserts are conflict-safe.
+    client_ip = Column(String, unique=True, index=True, nullable=False)
+    # Start of the current 60-second sliding window (Unix seconds, float).
+    window_start = Column(Float, nullable=False)
+    # Requests counted in the current window.
+    request_count = Column(Integer, nullable=False, default=0)
+    last_updated = Column(DateTime, default=lambda: datetime.now(timezone.utc))
