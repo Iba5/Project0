@@ -10,7 +10,8 @@ ROLE_PERMISSIONS = {
         Permission.CONTESTANTS_UPDATE,
         Permission.PAYMENTS_READ,
         Permission.REPORTS_EXPORT,
-        Permission.SETTINGS_UPDATE
+        Permission.SETTINGS_UPDATE,
+        Permission.ADMINS_MANAGE,  # M3 FIX: Only Super Admin can manage admins
     ],
     UserRole.ADMIN: [
         Permission.EVENTS_CREATE,
@@ -20,13 +21,13 @@ ROLE_PERMISSIONS = {
         Permission.CONTESTANTS_UPDATE,
         Permission.PAYMENTS_READ,
         Permission.REPORTS_EXPORT,
-        Permission.SETTINGS_UPDATE
+        Permission.SETTINGS_UPDATE,
     ],
     UserRole.MODERATOR: [
         Permission.CONTESTANTS_READ,
         Permission.CONTESTANTS_UPDATE,
-        Permission.PAYMENTS_READ
-    ]
+        Permission.PAYMENTS_READ,
+    ],
 }
 
 # Fraud Limits

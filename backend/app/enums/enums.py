@@ -14,6 +14,7 @@ class Permission(str, Enum):
     PAYMENTS_READ = "payments.read"
     REPORTS_EXPORT = "reports.export"
     SETTINGS_UPDATE = "settings.update"
+    ADMINS_MANAGE = "admins.manage"  # M3 FIX: Dedicated permission for admin management
 
 class EventStatus(str, Enum):
     DRAFT = "Draft"
@@ -54,3 +55,19 @@ class SocialSyncStatus(str, Enum):
     SYNCING = "Syncing"
     FAILED = "Failed"
     DISCONNECTED = "Disconnected"
+
+class CompetitionStatus(str, Enum):
+    DRAFT = "Draft"
+    ACTIVE = "Active"
+    COMPLETED = "Completed"
+    ARCHIVED = "Archived"
+
+class SourcePlatform(str, Enum):
+    TIKTOK = "tiktok"
+    FACEBOOK = "facebook"
+    INSTAGRAM = "instagram"
+    YOUTUBE = "youtube"
+    DIRECT = "direct"
+
+# Strict whitelist for URL parameter validation
+ALLOWED_SOURCE_PLATFORMS = {e.value for e in SourcePlatform}

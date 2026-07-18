@@ -3,10 +3,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.api.v1.dependencies import PermissionChecker, get_current_active_user
+from app.api.v1.dependencies import PermissionChecker, get_current_active_user, PaginationParams
 from app.enums.enums import Permission
 from app.services.services import EventService
 from app.schemas.schemas import EventCreate, EventUpdate, EventResponse
+from app.repositories.repositories import paginate_response
 from app.models.models import User
 
 router = APIRouter()
@@ -18,13 +19,13 @@ allow_delete = Depends(PermissionChecker(Permission.EVENTS_DELETE))
 
 @router.get(
     "/",
-    response_model=List[EventResponse],
-    summary="List all events",
+    summary="List all events (paginated)",
     dependencies=[allow_read]
 )
-def list_events(db: Session = Depends(get_db)):
+def list_events(pagination: PaginationParams = Depends(), db: Session = Depends(get_db)):
     event_service = EventService(db)
-    return event_service.list_events()
+    items, total = event_service.list_events(pagination.offset, pagination.limit)
+    return paginate_response(items, total, pagination.page, pagination.page_size)
 
 @router.get(
     "/{event_id}",

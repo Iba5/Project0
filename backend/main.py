@@ -1,10 +1,12 @@
+import os
 import uvicorn
 
 if __name__ == "__main__":
-    # Start uvicorn server pointing to the FastAPI app factory inside app.main
+    # L2 FIX: Read reload setting from environment variable (default: True for dev, False for production)
+    debug = os.getenv("DEBUG", "false").lower() in ("true", "1", "yes")
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",
         port=8000,
-        reload=True
+        reload=debug
     )

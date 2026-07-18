@@ -1,9 +1,12 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, ForeignKey, Enum
+from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, ForeignKey, Enum, Text, Numeric
 from sqlalchemy.orm import relationship
 from app.core.database import Base
-from app.enums.enums import UserRole, EventStatus, ContestantStatus, PaymentStatus, SocialPlatform, SocialSyncStatus
+from app.enums.enums import (
+    UserRole, EventStatus, ContestantStatus, PaymentStatus, 
+    SocialPlatform, SocialSyncStatus, CompetitionStatus
+)
 
 class User(Base):
     """
@@ -30,7 +33,39 @@ class User(Base):
     invitation_token_expires = Column(DateTime, nullable=True)
     invited_by = Column(String, nullable=True) # ID of user who sent invitation
 
+    # H2 FIX: Account lockout fields for brute-force protection
+    failed_login_count = Column(Integer, default=0, nullable=False)
+    locked_until = Column(DateTime, nullable=True)
+
     audit_logs = relationship("AuditLog", back_populates="user")
+
+
+class Competition(Base):
+    """
+    Competition entity that groups Events, Contestants, Votes and Transactions.
+    All voting operations are scoped to the active competition.
+    """
+    __tablename__ = "competitions"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    status = Column(Enum(CompetitionStatus), default=CompetitionStatus.DRAFT, nullable=False)
+    start_date = Column(DateTime, nullable=True)
+    end_date = Column(DateTime, nullable=True)
+    # C5 FIX: Numeric for monetary values — Float causes precision corruption
+    # (e.g. 0.1 + 0.2 = 0.30000000000000004)
+    vote_price = Column(Numeric(10, 2), default=1.00, nullable=False)
+    votes_per_payment = Column(Integer, default=1, nullable=False)
+    currency = Column(String, default="USD", nullable=False)
+    public_leaderboard = Column(Boolean, default=True)
+    is_active = Column(Boolean, default=False, index=True, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    deleted_at = Column(DateTime, nullable=True)
+
+    events = relationship("Event", back_populates="competition")
+    participants = relationship("Participant", back_populates="competition")
+
 
 class Event(Base):
     """
@@ -49,8 +84,8 @@ class Event(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     deleted_at = Column(DateTime, nullable=True) # Soft delete field
 
-    # Event Rules & Configurations
-    vote_price = Column(Float, default=1.0)
+    # C5 FIX: Numeric for monetary values
+    vote_price = Column(Numeric(10, 2), default=1.00)
     votes_per_payment = Column(Integer, default=1)
     currency = Column(String, default="USD")
     registration_opens = Column(DateTime, nullable=True)
@@ -62,9 +97,10 @@ class Event(Base):
     allowed_categories = Column(String, default="Singing,Dancing,Comedy")
     require_contestant_approval = Column(Boolean, default=True)
 
-    # FIX 1: Reverse relationship so we can navigate from an Event to its
-    # contestants when computing vote/pricing rules.
-    participants = relationship("Participant", back_populates="event")
+    # Foreign key to Competition (nullable for backward compatibility)
+    competition_id = Column(String, ForeignKey("competitions.id"), nullable=True, index=True)
+    competition = relationship("Competition", back_populates="events")
+
 
 class Participant(Base):
     """
@@ -83,40 +119,53 @@ class Participant(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     deleted_at = Column(DateTime, nullable=True) # Soft delete field
 
-    # FIX 1: Link each contestant to the event they belong to so vote-pricing rules
-    # can be resolved deterministically when a payment callback arrives. Nullable
-    # so legacy rows and the existing create flow keep working; populated by the
-    # service layer at creation time whenever an event context is known.
-    event_id = Column(String, ForeignKey("events.id"), nullable=True, index=True)
-    event = relationship("Event", back_populates="participants")
+    # Foreign key to Competition (nullable for backward compatibility)
+    competition_id = Column(String, ForeignKey("competitions.id"), nullable=True, index=True)
+    competition = relationship("Competition", back_populates="participants")
 
     payments = relationship("Payment", back_populates="contestant")
     vote_transactions = relationship("VoteTransaction", back_populates="contestant")
 
+
 class Payment(Base):
     """
     Payment record verifying payment phase (via Paynow).
+    Enhanced with voter tracking, source platform, and poll_url.
     """
     __tablename__ = "payments"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     reference = Column(String, unique=True, index=True, nullable=False)
     contestant_id = Column(String, ForeignKey("participants.id"), nullable=True)
-    amount = Column(Float, nullable=False)
+    # C5 FIX: Numeric for monetary values — never use Float for money
+    amount = Column(Numeric(10, 2), nullable=False)
     payment_method = Column(String, nullable=False) # Ecocash, OneMoney, Paynow, etc.
     status = Column(Enum(PaymentStatus), default=PaymentStatus.CREATED, nullable=False)
-    date = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    date = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)  # H7 FIX: index for date-ordered queries
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    # FIX 1: Link each payment to the event whose pricing rules were in effect
-    # at checkout time. This lets the Paynow callback compute the exact number
-    # of votes to award using event.vote_price and event.votes_per_payment
-    # instead of naively truncating the currency amount.
-    event_id = Column(String, ForeignKey("events.id"), nullable=True, index=True)
-    event = relationship("Event")
+    # --- NEW FIELDS ---
+    # Paynow integration
+    poll_url = Column(String, nullable=True, index=True)  # MUST be saved for status verification
+    paynow_redirect_url = Column(String, nullable=True)   # URL to redirect user to Paynow
+
+    # Voter identification
+    voter_phone = Column(String, nullable=True, index=True)    # Phone number of the payer
+    voter_name = Column(String, nullable=True)                  # Name of actual voter (if proxy)
+    voter_email = Column(String, nullable=True)                 # Email of actual voter (if proxy)
+
+    # Traffic source tracking
+    source_platform = Column(String, nullable=True, index=True)  # tiktok, facebook, instagram, youtube, direct
+
+    # Competition scoping
+    competition_id = Column(String, ForeignKey("competitions.id"), nullable=True, index=True)
+
+    # Warning acknowledgement (for duplicate voters)
+    duplicate_vote_acknowledged = Column(Boolean, default=False, nullable=False)
 
     contestant = relationship("Participant", back_populates="payments")
     vote_transaction = relationship("VoteTransaction", uselist=False, back_populates="payment")
+
 
 class VoteTransaction(Base):
     """
@@ -131,8 +180,12 @@ class VoteTransaction(Base):
     votes_awarded = Column(Integer, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
+    # Competition scoping
+    competition_id = Column(String, ForeignKey("competitions.id"), nullable=True, index=True)
+
     payment = relationship("Payment", back_populates="vote_transaction")
     contestant = relationship("Participant", back_populates="vote_transactions")
+
 
 class AuditLog(Base):
     """
@@ -150,6 +203,7 @@ class AuditLog(Base):
 
     user = relationship("User", back_populates="audit_logs")
 
+
 class Activity(Base):
     """
     Legacy general dashboard activity items (for frontend overview mapping).
@@ -161,9 +215,11 @@ class Activity(Base):
     detail = Column(String, nullable=True)
     time = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-class SocialPlatform(Base):
+
+class SocialPlatformSync(Base):
     """
     Sync status of social platforms used to pull video metadata.
+    Renamed from SocialPlatform to avoid conflict with the enum.
     """
     __tablename__ = "social_platforms"
 
@@ -172,6 +228,7 @@ class SocialPlatform(Base):
     status = Column(Enum(SocialSyncStatus), default=SocialSyncStatus.DISCONNECTED, nullable=False)
     last_sync = Column(DateTime, nullable=True)
     detail = Column(String, nullable=True)
+
 
 class Setting(Base):
     """
@@ -186,51 +243,3 @@ class Setting(Base):
     email_notifications = Column(Boolean, default=True)
     sms_notifications = Column(Boolean, default=False)
     marketing_notifications = Column(Boolean, default=False)
-
-
-class RevokedToken(Base):
-    """
-    FIX 6: JWT blocklist. Every logout writes the token's `jti` (JWT ID) here.
-    The auth dependency rejects any token whose `jti` appears in this table and
-    whose expiry has not yet passed, so a logged-out (or stolen-then-revoked)
-    token can no longer be used even though its signature is still valid.
-
-    Rows are pruned automatically once their `expires_at` is in the past, which
-    keeps the table bounded by the number of active tokens (token lifetime).
-    """
-    __tablename__ = "revoked_tokens"
-
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    # `jti` is the unique JWT ID minted in create_access_token(); uniqueness here
-    # means revoking the same token twice is a harmless no-op.
-    jti = Column(String, unique=True, index=True, nullable=False)
-    user_id = Column(String, ForeignKey("users.id"), nullable=True)
-    # When the JWT itself expires. We keep the row only while the token could
-    # still be presented; afterwards it is safe to delete.
-    expires_at = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-
-
-class RateLimitBucket(Base):
-    """
-    FIX 4: Distributed, cross-worker rate-limiting state.
-
-    Replaces the old process-local in-memory dict, which (a) reset limits per
-    Uvicorn worker and (b) leaked memory by never pruning expired IPs. Each
-    client IP gets one row; the middleware updates request_count and window_start
-    atomically so concurrent workers see a single, consistent counter.
-
-    Note: for very high-traffic deployments a Redis backend would be preferable;
-    this DB-backed implementation is correct for the admin app's traffic profile
-    and works with the existing PostgreSQL/SQLite stack.
-    """
-    __tablename__ = "rate_limit_buckets"
-
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    # The client IP being throttled. Unique so upserts are conflict-safe.
-    client_ip = Column(String, unique=True, index=True, nullable=False)
-    # Start of the current 60-second sliding window (Unix seconds, float).
-    window_start = Column(Float, nullable=False)
-    # Requests counted in the current window.
-    request_count = Column(Integer, nullable=False, default=0)
-    last_updated = Column(DateTime, default=lambda: datetime.now(timezone.utc))

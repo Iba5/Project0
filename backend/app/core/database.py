@@ -1,15 +1,25 @@
-from typing import Generator
+from typing import Generator, Dict, Any
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 from app.core.config import settings
 
-# In PostgreSQL, we want to enable pool_pre_ping to automatically handle drops in connection.
-engine = create_engine(
-    settings.DATABASE_URL,
-    pool_pre_ping=True,
-    # If sqlite is used as local fallback, we disable thread-checking
-    connect_args={"check_same_thread": False} if settings.DATABASE_URL.startswith("sqlite") else {}
-)
+# M1 FIX: Configure connection pool for production workloads.
+# Pool settings are only meaningful for PostgreSQL/MySQL; SQLite uses NullPool by default.
+engine_kwargs: Dict[str, Any] = {
+    "pool_pre_ping": True,
+}
+
+if not settings.DATABASE_URL.startswith("sqlite"):
+    engine_kwargs.update({
+        "pool_size": settings.DB_POOL_SIZE,
+        "max_overflow": settings.DB_MAX_OVERFLOW,
+        "pool_timeout": settings.DB_POOL_TIMEOUT,
+    })
+else:
+    # SQLite doesn't support connection pooling — disable it
+    engine_kwargs["connect_args"] = {"check_same_thread": False}
+
+engine = create_engine(settings.DATABASE_URL, **engine_kwargs)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

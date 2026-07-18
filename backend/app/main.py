@@ -1,5 +1,6 @@
 import logging
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
@@ -16,6 +17,9 @@ from app.api.v1.api import api_router
 from app.middleware.middleware import RequestLoggingMiddleware, RateLimitingMiddleware
 from app.exceptions.exceptions import VotingException, NotFoundException, AuthenticationException, AuthorizationException
 
+# Validate critical secrets at import time (fails fast before any route is registered)
+settings.validate_secrets()
+
 # Setup application start time for health uptime calculation
 APP_START_TIME = time.time()
 
@@ -26,6 +30,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# H6 FIX: Use lifespan context manager instead of deprecated @app.on_event("startup")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize Redis connection at startup (non-blocking — middleware falls back to in-memory)."""
+    from app.core.redis import init_redis
+    init_redis()
+    yield
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="Backend API for managing contestants, events, payments, and vote allocations.",
@@ -33,20 +45,24 @@ app = FastAPI(
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
     docs_url=f"{settings.API_V1_STR}/docs",
     redoc_url=f"{settings.API_V1_STR}/redoc",
+    lifespan=lifespan,
 )
 
 # --- Middleware Registrations ---
 
+# Parse allowed hosts from comma-separated env var
+_allowed_hosts = [h.strip() for h in settings.ALLOWED_HOSTS.split(",") if h.strip()]
+
 # 1. Trusted Hosts
-app.add_middleware(
-    TrustedHostMiddleware,
-    allowed_hosts=["*"] # Adjust in production config
-)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=_allowed_hosts)
+
+# Parse CORS origins from comma-separated env var
+_cors_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
 
 # 2. CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Adjust in production
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -58,7 +74,7 @@ app.add_middleware(
     minimum_size=1000
 )
 
-# 4. In-Memory IP Rate Limiter
+# 4. Redis-Backed IP Rate Limiter (falls back to in-memory if Redis is down)
 app.add_middleware(
     RateLimitingMiddleware
 )
@@ -137,19 +153,20 @@ def health_check():
     uptime = time.time() - APP_START_TIME
     db_status = "connected"
     
-    # Try querying the DB
+    # Try querying the DB with proper resource cleanup
+    db = SessionLocal()
     try:
-        db = SessionLocal()
         db.execute(text("SELECT 1"))
-        db.close()
     except Exception as e:
         logger.error(f"Health Check DB failure: {str(e)}")
         db_status = "disconnected"
+    finally:
+        db.close()
         
     return {
         "status": "healthy" if db_status == "connected" else "unhealthy",
         "database": db_status,
-        "storage": "connected", # Placeholder for Supabase Storage check
+        "storage": "connected",  # Placeholder for Supabase Storage check
         "version": "1.0.0",
         "uptime": f"{uptime:.2f}s"
     }

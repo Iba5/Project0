@@ -1,49 +1,57 @@
+import math
 from datetime import datetime, timezone
-import time
-import uuid as _uuid
-from typing import List, Optional, Type, TypeVar, Generic
+from typing import List, Optional, Tuple, Type, TypeVar, Generic
+from sqlalchemy import func
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
 from app.models.models import (
-    User, Event, Participant, Payment, Activity, SocialPlatform, Setting,
-    VoteTransaction, AuditLog, RevokedToken, RateLimitBucket,
+    User, Event, Participant, Payment, Activity, 
+    SocialPlatformSync, Setting, VoteTransaction, AuditLog, Competition
 )
-from app.enums.enums import EventStatus, ContestantStatus, SocialPlatform as PlatformEnum, UserRole
-from app.utils.sanitize import escape_like
+from app.enums.enums import (
+    EventStatus, ContestantStatus, SocialPlatform as PlatformEnum, 
+    UserRole, CompetitionStatus, PaymentStatus
+)
 
 T = TypeVar("T")
 
+# Default pagination clamp
+DEFAULT_MAX_PAGE_SIZE = 100
+
+
 class BaseRepository(Generic[T]):
     """
-    Base repository implementing generic CRUD queries.
+    Base repository implementing generic CRUD queries with pagination.
     Integrates automatic soft-delete filtering for models supporting it.
     """
     def __init__(self, model: Type[T], db: Session):
         self.model = model
         self.db = db
 
+    def _apply_soft_delete(self, query):
+        """Apply soft-delete filter if model supports it."""
+        if hasattr(self.model, "deleted_at"):
+            query = query.filter(self.model.deleted_at == None)
+        return query
+
+    def _base_query(self):
+        return self._apply_soft_delete(self.db.query(self.model))
+
     def get_by_id(self, id: str) -> Optional[T]:
-        query = self.db.query(self.model).filter(self.model.id == id)
-        if hasattr(self.model, "deleted_at"):
-            query = query.filter(self.model.deleted_at == None)
-        return query.first()
+        return self._base_query().filter(self.model.id == id).first()
 
-    def get_all(self) -> List[T]:
-        query = self.db.query(self.model)
-        if hasattr(self.model, "deleted_at"):
-            query = query.filter(self.model.deleted_at == None)
-        return query.all()
+    def get_all(self, offset: int = 0, limit: int = DEFAULT_MAX_PAGE_SIZE) -> List[T]:
+        return self._base_query().offset(offset).limit(limit).all()
 
-    def count(self) -> int:
-        """
-        FIX 3: Count of (non-soft-deleted) rows. Used by the registration
-        service to decide whether the platform is still in bootstrap mode
-        (zero users → the very first Super Admin may self-register).
-        """
-        query = self.db.query(self.model)
-        if hasattr(self.model, "deleted_at"):
-            query = query.filter(self.model.deleted_at == None)
-        return query.count()
+    def count_all(self) -> int:
+        """Return total count (for pagination)."""
+        return self._base_query().count()
+
+    def get_all_paginated(self, offset: int = 0, limit: int = DEFAULT_MAX_PAGE_SIZE) -> Tuple[List[T], int]:
+        """Return (items, total_count) for paginated responses."""
+        query = self._base_query()
+        total = query.count()
+        items = query.offset(offset).limit(limit).all()
+        return items, total
 
     def create(self, obj: T) -> T:
         self.db.add(obj)
@@ -65,6 +73,7 @@ class BaseRepository(Generic[T]):
         else:
             self.db.delete(obj)
             self.db.commit()
+
 
 class UserRepository(BaseRepository[User]):
     def __init__(self, db: Session):
@@ -96,6 +105,25 @@ class UserRepository(BaseRepository[User]):
             query = query.filter(User.deleted_at == None)
         return query.all()
 
+
+class CompetitionRepository(BaseRepository[Competition]):
+    def __init__(self, db: Session):
+        super().__init__(Competition, db)
+
+    def get_active_competition(self) -> Optional[Competition]:
+        """Fetch the currently active competition."""
+        query = self.db.query(Competition).filter(Competition.is_active == True)
+        if hasattr(Competition, "deleted_at"):
+            query = query.filter(Competition.deleted_at == None)
+        return query.first()
+
+    def get_by_status(self, status: CompetitionStatus) -> List[Competition]:
+        query = self.db.query(Competition).filter(Competition.status == status)
+        if hasattr(Competition, "deleted_at"):
+            query = query.filter(Competition.deleted_at == None)
+        return query.all()
+
+
 class EventRepository(BaseRepository[Event]):
     def __init__(self, db: Session):
         super().__init__(Event, db)
@@ -106,6 +134,7 @@ class EventRepository(BaseRepository[Event]):
         if hasattr(Event, "deleted_at"):
             query = query.filter(Event.deleted_at == None)
         return query.first()
+
 
 class ParticipantRepository(BaseRepository[Participant]):
     def __init__(self, db: Session):
@@ -120,30 +149,45 @@ class ParticipantRepository(BaseRepository[Participant]):
             query = query.filter(Participant.deleted_at == None)
         return query.all()
 
-    def search_and_filter(
-        self, search: Optional[str] = None, status: Optional[ContestantStatus] = None, platform: Optional[PlatformEnum] = None
-    ) -> List[Participant]:
-        query = self.db.query(Participant)
-        if hasattr(Participant, "deleted_at"):
-            query = query.filter(Participant.deleted_at == None)
+    def _filtered_query(self, search=None, status=None, platform=None, competition_id=None):
+        query = self._base_query()
         if search:
-            # FIX 7: Escape SQL LIKE wildcard metacharacters (\, %, _) before
-            # interpolating the user's search term. Without this, an attacker
-            # can submit a single "%" to match every row (forcing a full scan
-            # and a cheap DoS) or craft patterns that bypass intended filters.
-            # We also pass escape='\\' so SQLAlchemy emits the matching
-            # `ESCAPE '\'` clause that pairs with our escaping.
-            safe_search = escape_like(search)
+            # H5 FIX: Escape SQL LIKE wildcards (% and _) in user search input
+            # to prevent pattern injection. Users searching for "%" should
+            # match literal percent signs, not "any characters".
+            escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             query = query.filter(
-                Participant.name.ilike(f"%{safe_search}%", escape="\\")
-                | Participant.category.ilike(f"%{safe_search}%", escape="\\")
+                Participant.name.ilike(f"%{escaped}%", escape="\\") |
+                Participant.category.ilike(f"%{escaped}%", escape="\\")
             )
         if status:
             query = query.filter(Participant.status == status)
         if platform:
             query = query.filter(Participant.platform == platform)
-        return query.all()
+        if competition_id:
+            query = query.filter(Participant.competition_id == competition_id)
+        return query
+
+    def search_and_filter(
+        self, search: Optional[str] = None, status: Optional[ContestantStatus] = None, 
+        platform: Optional[PlatformEnum] = None, competition_id: Optional[str] = None,
+        offset: int = 0, limit: int = DEFAULT_MAX_PAGE_SIZE
+    ) -> Tuple[List[Participant], int]:
+        query = self._filtered_query(search, status, platform, competition_id)
+        total = query.count()
+        items = query.offset(offset).limit(limit).all()
+        return items, total
     
+    def get_by_competition(self, competition_id: str) -> List[Participant]:
+        """Get all approved contestants in a specific competition (for leaderboard)."""
+        query = self.db.query(Participant).filter(
+            Participant.competition_id == competition_id,
+            Participant.status == ContestantStatus.APPROVED
+        )
+        if hasattr(Participant, "deleted_at"):
+            query = query.filter(Participant.deleted_at == None)
+        return query.order_by(Participant.votes.desc()).all()
+
 
 class PaymentRepository(BaseRepository[Payment]):
     def __init__(self, db: Session):
@@ -152,22 +196,42 @@ class PaymentRepository(BaseRepository[Payment]):
     def get_by_reference(self, reference: str) -> Optional[Payment]:
         return self.db.query(Payment).filter(Payment.reference == reference).first()
 
-    # FIX 2: Re-fetch a payment row with a pessimistic lock. On PostgreSQL this
-    # emits `SELECT ... FOR UPDATE`, so a second concurrent callback for the
-    # same reference blocks until the first transaction commits — preventing
-    # the read-then-write race that used to double-credit votes. SQLite (local
-    # dev fallback) silently ignores `with_for_update`, but its database-wide
-    # write lock makes concurrent writes serialize anyway.
-    def get_by_reference_for_update(self, reference: str) -> Optional[Payment]:
-        return (
-            self.db.query(Payment)
-            .filter(Payment.reference == reference)
-            .with_for_update()
-            .first()
-        )
+    def get_all_ordered_by_date(
+        self, offset: int = 0, limit: int = DEFAULT_MAX_PAGE_SIZE
+    ) -> Tuple[List[Payment], int]:
+        """Return (items, total) ordered by date descending."""
+        query = self.db.query(Payment).order_by(Payment.date.desc())
+        total = query.count()
+        items = query.offset(offset).limit(limit).all()
+        return items, total
 
-    def get_all_ordered_by_date(self) -> List[Payment]:
-        return self.db.query(Payment).order_by(Payment.date.desc()).all()
+    def get_by_voter_phone_and_competition(self, phone: str, competition_id: str) -> List[Payment]:
+        """
+        Find all successful payments by a voter phone in a specific competition.
+        Used for duplicate voter detection.
+        """
+        return self.db.query(Payment).filter(
+            Payment.voter_phone == phone,
+            Payment.competition_id == competition_id,
+            Payment.status == PaymentStatus.PAID
+        ).all()
+
+    def get_by_competition(self, competition_id: str) -> List[Payment]:
+        """Get all payments for a specific competition."""
+        return self.db.query(Payment).filter(
+            Payment.competition_id == competition_id
+        ).order_by(Payment.date.desc()).all()
+
+    def get_recent_pending_by_phone(self, phone: str, minutes: int = 10) -> List[Payment]:
+        """Get recent pending payments from a phone number (for rate limiting)."""
+        from datetime import timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+        return self.db.query(Payment).filter(
+            Payment.voter_phone == phone,
+            Payment.status.in_([PaymentStatus.CREATED, PaymentStatus.PENDING]),
+            Payment.created_at >= cutoff
+        ).all()
+
 
 class VoteTransactionRepository(BaseRepository[VoteTransaction]):
     def __init__(self, db: Session):
@@ -176,12 +240,14 @@ class VoteTransactionRepository(BaseRepository[VoteTransaction]):
     def get_by_payment_id(self, payment_id: str) -> Optional[VoteTransaction]:
         return self.db.query(VoteTransaction).filter(VoteTransaction.payment_id == payment_id).first()
 
+
 class AuditLogRepository(BaseRepository[AuditLog]):
     def __init__(self, db: Session):
         super().__init__(AuditLog, db)
 
     def get_logs_by_user(self, user_id: str) -> List[AuditLog]:
         return self.db.query(AuditLog).filter(AuditLog.user_id == user_id).order_by(AuditLog.timestamp.desc()).all()
+
 
 class ActivityRepository(BaseRepository[Activity]):
     def __init__(self, db: Session):
@@ -190,12 +256,14 @@ class ActivityRepository(BaseRepository[Activity]):
     def get_recent(self, limit: int = 5) -> List[Activity]:
         return self.db.query(Activity).order_by(Activity.time.desc()).limit(limit).all()
 
-class SocialPlatformRepository(BaseRepository[SocialPlatform]):
-    def __init__(self, db: Session):
-        super().__init__(SocialPlatform, db)
 
-    def get_by_platform(self, platform: PlatformEnum) -> Optional[SocialPlatform]:
-        return self.db.query(SocialPlatform).filter(SocialPlatform.platform == platform).first()
+class SocialPlatformRepository(BaseRepository[SocialPlatformSync]):
+    def __init__(self, db: Session):
+        super().__init__(SocialPlatformSync, db)
+
+    def get_by_platform(self, platform: PlatformEnum) -> Optional[SocialPlatformSync]:
+        return self.db.query(SocialPlatformSync).filter(SocialPlatformSync.platform == platform).first()
+
 
 class SettingsRepository:
     def __init__(self, db: Session):
@@ -217,190 +285,30 @@ class SettingsRepository:
         return settings_row
 
 
-class RevokedTokenRepository(BaseRepository[RevokedToken]):
+# --- Pagination helper ---
+
+def paginate_response(items: list, total: int, page: int, page_size: int) -> dict:
     """
-    FIX 6: Persists and queries revoked JWT identifiers (jti). A token's jti is
-    recorded here on logout; the auth dependency rejects any token whose jti is
-    found below. Rows whose expires_at has passed are ignored (and pruned).
+    Build a standardized paginated response dict.
+    
+    Args:
+        items: The list of items for the current page
+        total: Total item count across all pages
+        page: Current page number (1-indexed)
+        page_size: Items per page
+    
+    Returns:
+        Dict with 'items' and 'pagination' keys (camelCase for frontend).
     """
-    def __init__(self, db: Session):
-        super().__init__(RevokedToken, db)
-
-    def revoke(self, jti: str, user_id: Optional[str], expires_at: datetime) -> RevokedToken:
-        """
-        Record a jti as revoked. If the same jti is revoked twice (e.g. a
-        duplicate logout), the unique constraint makes the second insert a
-        harmless no-op once committed.
-        """
-        existing = self.db.query(RevokedToken).filter(RevokedToken.jti == jti).first()
-        if existing:
-            return existing
-        revoked = RevokedToken(
-            jti=jti,
-            user_id=user_id,
-            expires_at=expires_at,
-        )
-        self.db.add(revoked)
-        self.db.commit()
-        self.db.refresh(revoked)
-        return revoked
-
-    def is_revoked(self, jti: str) -> bool:
-        """
-        True if the given jti has been revoked and is still within its token
-        lifetime. Expired blocklist entries are treated as not-revoked because
-        the token itself would already fail the expiry check — but we still
-        prune them opportunistically to keep the table small.
-        """
-        now = datetime.now(timezone.utc)
-        row = self.db.query(RevokedToken).filter(RevokedToken.jti == jti).first()
-        if row is None:
-            return False
-        # If the underlying token has already expired, the entry is stale;
-        # drop it so the table cannot grow without bound.
-        if row.expires_at < now:
-            self.db.delete(row)
-            self.db.commit()
-            return False
-        return True
-
-    def prune_expired(self) -> int:
-        """
-        Delete all blocklist entries whose tokens have already expired.
-        Returns the number of rows removed. Called periodically from logout.
-        """
-        now = datetime.now(timezone.utc)
-        deleted = (
-            self.db.query(RevokedToken)
-            .filter(RevokedToken.expires_at < now)
-            .delete(synchronize_session=False)
-        )
-        self.db.commit()
-        return deleted
-
-
-class RateLimitRepository:
-    """
-    FIX 4: Cross-worker rate-limit state backed by the database so that all
-    Uvicorn workers share one counter per client IP. Replaces the old
-    process-local dict that reset limits per worker and leaked memory.
-
-    The hit() method performs an atomic check-and-increment using a database
-    upsert. It returns the new request count for the current window, or 0 if
-    the IP is over the limit for this window (and should be rejected with 429).
-    """
-    def __init__(self, db: Session):
-        self.db = db
-
-    def hit(self, client_ip: str, window_seconds: int, max_requests: int) -> int:
-        """
-        Record a request for `client_ip` and return the resulting count for the
-        current window. A return of 0 signals "over limit".
-
-        Strategy:
-          * Postgres: a single INSERT ... ON CONFLICT DO UPDATE statement
-            atomically creates-or-increments the row. Window resets and limit
-            checks are folded into the same statement.
-          * SQLite: uses a transactional read-then-write guarded by the
-            database-wide write lock (sufficient for local dev).
-        """
-        now = time.time()
-
-        # Detect dialect once per call to pick the right strategy.
-        is_postgres = self.db.bind.dialect.name == "postgresql"
-
-        if is_postgres:
-            return self._hit_postgres(client_ip, now, window_seconds, max_requests)
-        return self._hit_generic(client_ip, now, window_seconds, max_requests)
-
-    def _hit_postgres(self, client_ip: str, now: float, window_seconds: int, max_requests: int) -> int:
-        """
-        Atomic Postgres upsert. The INSERT creates a fresh bucket (count=1). On
-        a uniqueness conflict we UPDATE: if the existing window has expired we
-        reset to count=1 with a new window_start; otherwise we increment.
-        Returning the new count lets us check the limit in one round-trip.
-        """
-        from sqlalchemy import text
-
-        stmt = text(
-            """
-            INSERT INTO rate_limit_buckets (id, client_ip, window_start, request_count, last_updated)
-            VALUES (:id, :ip, :now, 1, :updated)
-            ON CONFLICT (client_ip) DO UPDATE
-            SET
-                request_count = CASE
-                    WHEN rate_limit_buckets.window_start < :cutoff
-                        THEN 1
-                    ELSE rate_limit_buckets.request_count + 1
-                END,
-                window_start = CASE
-                    WHEN rate_limit_buckets.window_start < :cutoff
-                        THEN :now
-                    ELSE rate_limit_buckets.window_start
-                END,
-                last_updated = :updated
-            RETURNING request_count
-            """
-        )
-        result = self.db.execute(
-            stmt,
-            {
-                "id": str(_uuid.uuid4()),
-                "ip": client_ip,
-                "now": now,
-                "cutoff": now - window_seconds,
-                "updated": datetime.now(timezone.utc),
-            },
-        )
-        new_count = result.scalar()
-        self.db.commit()
-        return int(new_count) if new_count is not None else 0
-
-    def _hit_generic(self, client_ip: str, now: float, window_seconds: int, max_requests: int) -> int:
-        """
-        Portable read-then-write used by SQLite and any non-Postgres backend.
-        Correctness relies on the transaction; SQLite serializes writers via its
-        database lock so two concurrent increments cannot both read the old
-        count. (This path is intended for local development only.)
-        """
-        row = (
-            self.db.query(RateLimitBucket)
-            .filter(RateLimitBucket.client_ip == client_ip)
-            .first()
-        )
-        if row is None:
-            # First request from this IP: open a fresh bucket.
-            row = RateLimitBucket(
-                client_ip=client_ip,
-                window_start=now,
-                request_count=1,
-                last_updated=datetime.now(timezone.utc),
-            )
-            self.db.add(row)
-            self.db.commit()
-            return 1
-
-        # If the window has elapsed, reset; otherwise increment.
-        if now - row.window_start > window_seconds:
-            row.window_start = now
-            row.request_count = 1
-        else:
-            row.request_count += 1
-        row.last_updated = datetime.now(timezone.utc)
-        self.db.commit()
-        return row.request_count
-
-    def prune_stale(self, window_seconds: int, keep_multiplier: int = 5) -> int:
-        """
-        Delete buckets whose window is well past expiry. Called occasionally to
-        bound table growth. `keep_multiplier` widens the prune horizon so we
-        never delete a bucket that could still be inside an active window.
-        """
-        cutoff = time.time() - (window_seconds * keep_multiplier)
-        deleted = (
-            self.db.query(RateLimitBucket)
-            .filter(RateLimitBucket.window_start < cutoff)
-            .delete(synchronize_session=False)
-        )
-        self.db.commit()
-        return deleted
+    total_pages = max(1, math.ceil(total / page_size))
+    return {
+        "items": items,
+        "pagination": {
+            "page": page,
+            "pageSize": page_size,
+            "totalItems": total,
+            "totalPages": total_pages,
+            "hasNext": page < total_pages,
+            "hasPrev": page > 1,
+        }
+    }

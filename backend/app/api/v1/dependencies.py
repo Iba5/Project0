@@ -1,9 +1,10 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Query, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.security import decode_access_token
+from app.core.config import settings
 from app.models.models import User
 from app.repositories.repositories import UserRepository
 from app.enums.enums import Permission
@@ -69,3 +70,34 @@ class PermissionChecker:
                 detail="You do not have permission to access this resource"
             )
         return current_user
+
+
+# --- Pagination Dependency ---
+
+class PaginationParams:
+    """
+    Reusable dependency for page/size pagination.
+    Clamps page_size to [1, MAX_PAGE_SIZE] with a sensible default.
+    
+    Usage in endpoints:
+        def list_items(pagination: PaginationParams = Depends()):
+            items, total = repo.get_all(pagination.offset, pagination.limit)
+            return paginate_response(items, total, pagination)
+    """
+    def __init__(
+        self,
+        page: int = Query(1, ge=1, description="Page number (1-indexed)"),
+        page_size: int = Query(settings.DEFAULT_PAGE_SIZE, ge=1, le=settings.MAX_PAGE_SIZE, description="Items per page"),
+    ):
+        self.page = page
+        self.page_size = min(page_size, settings.MAX_PAGE_SIZE)
+
+    @property
+    def offset(self) -> int:
+        """SQL OFFSET value."""
+        return (self.page - 1) * self.page_size
+
+    @property
+    def limit(self) -> int:
+        """SQL LIMIT value."""
+        return self.page_size

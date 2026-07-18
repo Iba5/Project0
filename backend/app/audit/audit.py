@@ -10,6 +10,10 @@ class AuditService:
     """
     Handles logging of security sensitive operations and admin activities.
     Generates immutable audit records that must never be deleted.
+    
+    H8 FIX: Added `auto_commit` parameter. When called from inside a larger
+    transaction (e.g., payment callback), pass auto_commit=False to add the
+    audit entry to the current transaction without committing independently.
     """
     @staticmethod
     def log_action(
@@ -17,12 +21,16 @@ class AuditService:
         action: str,
         user_id: Optional[str] = None,
         ip_address: Optional[str] = None,
-        details: Optional[str] = None
+        details: Optional[str] = None,
+        auto_commit: bool = True,
     ) -> AuditLog:
         """
         Creates and stores an immutable audit log entry in the database.
+        
+        Args:
+            auto_commit: If True (default), commits immediately. Set to False
+                         when called inside a larger transaction to maintain atomicity.
         """
-        audit_repo = AuditLogRepository(db)
         log_entry = AuditLog(
             user_id=user_id,
             action=action,
@@ -36,4 +44,10 @@ class AuditService:
             f"IP: {ip_address} | Details: {details}"
         )
         
-        return audit_repo.create(log_entry)
+        if auto_commit:
+            audit_repo = AuditLogRepository(db)
+            return audit_repo.create(log_entry)
+        else:
+            # Add to current transaction without committing
+            db.add(log_entry)
+            return log_entry

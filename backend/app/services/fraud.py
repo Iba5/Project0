@@ -2,6 +2,7 @@ import logging
 from sqlalchemy.orm import Session
 from app.exceptions.exceptions import FraudException
 from app.repositories.repositories import PaymentRepository, VoteTransactionRepository
+from app.constants.constants import MAX_VOTES_PER_TRANSACTION
 
 logger = logging.getLogger(__name__)
 
@@ -26,16 +27,31 @@ class FraudDetectionService:
 
     def detect_suspicious_voting(self, contestant_id: str, votes: int) -> None:
         """
-        Monitors high velocity/volume voting patterns.
+        M5/M6 FIX: Actually enforce the MAX_VOTES_PER_TRANSACTION limit.
+        Previously only logged a warning. Now blocks transactions exceeding the threshold.
         """
-        if votes > 1000:
-            logger.warning(f"Fraud Alert | High volume vote purchase of {votes} for contestant: {contestant_id}")
-            # Real applications might flag or freeze this transaction for manual moderator review.
-            # Here we simulate logging the flag.
-            
+        if votes > MAX_VOTES_PER_TRANSACTION:
+            logger.warning(
+                f"Fraud Alert | Vote purchase of {votes} exceeds limit "
+                f"({MAX_VOTES_PER_TRANSACTION}) for contestant: {contestant_id}"
+            )
+            raise FraudException(
+                f"Vote amount {votes} exceeds the maximum allowed "
+                f"per transaction ({MAX_VOTES_PER_TRANSACTION})."
+            )
+
     def verify_request_replay(self, request_id: str) -> None:
         """
-        Analyzes Request IDs to prevent replay attacks.
+        M10 FIX: Previously a no-op placeholder. Now raises NotImplementedError
+        to prevent false sense of security.
+        
+        To implement: use Redis SET NX with TTL to store seen request IDs.
+        Example:
+            if redis.set(f"replay:{request_id}", "1", nx=True, ex=300):
+                return  # First time seeing this request
+            raise FraudException("Replay detected: this request ID has already been processed.")
         """
-        # Placeholder checking a Redis/memcached cache for previously seen request IDs.
-        pass
+        raise NotImplementedError(
+            "Replay detection is not yet implemented. "
+            "Implement with Redis SET NX before enabling in production."
+        )

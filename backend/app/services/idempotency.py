@@ -13,17 +13,17 @@ class IdempotencyService:
     def __init__(self, db: Session):
         self.payment_repo = PaymentRepository(db)
 
-    def is_callback_already_processed(self, reference: str) -> bool:
+    def is_callback_already_processed(self, payment) -> bool:
         """
-        Checks if a transaction callback reference has already transitioned to a final state (PAID/FAILED).
+        Checks if a payment has already transitioned to a final state (PAID/FAILED).
+        Accepts a Payment object directly (may be row-locked).
         """
-        payment = self.payment_repo.get_by_reference(reference)
         if not payment:
             return False
             
         # If status is PAID or FAILED, it is already processed and should be ignored
         if payment.status in [PaymentStatus.PAID, PaymentStatus.FAILED]:
-            logger.info(f"Idempotency | Reference {reference} is already in state {payment.status.value}. Skipping callback.")
+            logger.info(f"Idempotency | Reference {payment.reference} is already in state {payment.status.value}. Skipping callback.")
             return True
             
         return False
