@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-const API_URL = process.env.API_URL || 'http://localhost:8000/api/v1'
+const API_URL = process.env.BACKEND_API_URL
 
 type Ctx = { params: Promise<{ path: string[] }> }
 
