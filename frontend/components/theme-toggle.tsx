@@ -1,36 +1,23 @@
-"use client"
+'use client'
 
-import { useEffect, useState } from "react"
-import { MoonStar, SunMedium } from "lucide-react"
-import { useTheme } from "next-themes"
+import { Moon, Sun } from 'lucide-react'
+import { useTheme } from 'next-themes'
+import { Button } from '@/components/ui/button'
 
-import { Button } from "@/components/ui/button"
-
-// Switches the interface between light and dark presentation modes.
 export function ThemeToggle() {
-  const { theme, setTheme } = useTheme()
-  const [mounted, setMounted] = useState(false)
-
-  // Wait until mounted on the client before rendering the theme-dependent icon.
-  useEffect(() => {
-    setMounted(true)
-  }, [])
-
-  const isDark = theme === "dark"
+  const { setTheme, resolvedTheme } = useTheme()
 
   return (
     <Button
-      type="button"
-      variant="outline"
+      variant="ghost"
       size="icon"
+      onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
+      className="rounded-full"
       aria-label="Toggle theme"
-      onClick={() => setTheme(isDark ? "light" : "dark")}
     >
-      {mounted ? (
-        isDark ? <SunMedium className="size-4" /> : <MoonStar className="size-4" />
-      ) : (
-        <span className="size-4" />
-      )}
+      <Sun className="size-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
+      <Moon className="absolute size-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+      <span className="sr-only">Toggle theme</span>
     </Button>
   )
 }

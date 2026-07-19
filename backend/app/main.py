@@ -1,7 +1,7 @@
 import logging
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from typing import Any, Dict, List
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,13 +9,12 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.exceptions import RequestValidationError
 from sqlalchemy.sql import text
-from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.database import SessionLocal, get_db
+from app.core.database import SessionLocal
 from app.api.v1.api import api_router
 from app.middleware.middleware import RequestLoggingMiddleware, RateLimitingMiddleware
-from app.exceptions.exceptions import VotingException, NotFoundException, AuthenticationException, AuthorizationException
+from app.exceptions.exceptions import VotingException
 
 # Validate critical secrets at import time (fails fast before any route is registered)
 settings.validate_secrets()
@@ -33,10 +32,14 @@ logger = logging.getLogger(__name__)
 # H6 FIX: Use lifespan context manager instead of deprecated @app.on_event("startup")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize Redis connection at startup (non-blocking — middleware falls back to in-memory)."""
-    from app.core.redis import init_redis
-    init_redis()
-    yield
+    from app.core.redis import init_redis, close_redis
+
+    await init_redis()
+
+    try:
+        yield
+    finally:
+        await close_redis()
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -115,7 +118,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     Standardized handler for FastAPI validation failures.
     """
     logger.warning(f"Validation failure on {request.url.path}: {exc.errors()}")
-    errors_list = [
+    errors_list :List[Dict[str,Any]] = [
         {"field": " -> ".join(map(str, err["loc"])), "message": err["msg"]}
         for err in exc.errors()
     ]

@@ -21,7 +21,12 @@ else:
 
 engine = create_engine(settings.DATABASE_URL, **engine_kwargs)
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+SessionLocal = sessionmaker(
+    bind=engine,
+    autoflush=False,
+    autocommit=False,
+    expire_on_commit=False,
+)
 
 Base = declarative_base()
 

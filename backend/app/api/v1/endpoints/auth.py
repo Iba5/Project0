@@ -1,20 +1,25 @@
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
-
 from app.core.config import settings
 from app.core.database import get_db
 from app.services.services import AuthService
 from app.schemas.schemas import (
-    UserRegister, UserLogin, AuthResult, ForgotPasswordRequest, 
-    ResetPasswordRequest, AdminInvitationRequest, AdminInvitationResponse, 
-    InvalidateAdminRequest
+    AuthResult,
+    AdminInvitationResponse,
+    UserRegister,
+    UserLogin,
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
+    AdminInvitationRequest,
+    InvalidateAdminRequest,
 )
 from app.api.v1.dependencies import get_current_active_user, PermissionChecker
 from app.enums.enums import Permission
 from app.models.models import User
 from app.exceptions.exceptions import ValidationException, AuthenticationException
-
 router = APIRouter()
 
 
@@ -40,8 +45,8 @@ class CompleteSignupBody(BaseModel):
 def register(
     request: Request,
     user_in: UserRegister,
-    db: Session = Depends(get_db)
-):
+    db: Session = Depends(get_db),
+) -> AuthResult:
     # H3 FIX: Require bootstrap token if no admins exist yet
     # This prevents open registration while allowing first-time setup
     from app.repositories.repositories import UserRepository
@@ -81,7 +86,11 @@ def register(
     summary="Login to Admin account",
     description="Authenticates Admin email and password credentials, returning a JWT token."
 )
-def login(request: Request, login_in: UserLogin, db: Session = Depends(get_db)):
+def login(
+    request: Request,
+    login_in: UserLogin,
+    db: Session = Depends(get_db),
+) -> AuthResult:
     auth_service = AuthService(db)
     client_ip = request.client.host if request.client else None
     return auth_service.login_admin(login_in, ip_address=client_ip)
@@ -92,7 +101,11 @@ def login(request: Request, login_in: UserLogin, db: Session = Depends(get_db)):
     summary="Logout from Admin account",
     description="Logs out the currently authenticated admin and records the audit event."
 )
-def logout(request: Request, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
+def logout(
+    request: Request,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
     auth_service = AuthService(db)
     client_ip = request.client.host if request.client else None
     auth_service.logout_admin(current_user.id, ip_address=client_ip)
@@ -104,7 +117,10 @@ def logout(request: Request, current_user: User = Depends(get_current_active_use
     summary="Forgot Password request",
     description="Submits a password reset request which sends an email with reset link."
 )
-def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
+def forgot_password(
+    req: ForgotPasswordRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
     auth_service = AuthService(db)
     auth_service.request_password_reset(req.email)
     return {"message": "If the email is registered, a password reset link has been sent to your email."}
@@ -115,7 +131,10 @@ def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
     summary="Reset Password",
     description="Reset password using valid reset token from email."
 )
-def reset_password(reset_request: ResetPasswordRequest, db: Session = Depends(get_db)):
+def reset_password(
+    reset_request: ResetPasswordRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
     auth_service = AuthService(db)
     # C3 FIX: Let custom exceptions propagate with correct status codes.
     auth_service.reset_password(reset_request)
@@ -131,8 +150,8 @@ def reset_password(reset_request: ResetPasswordRequest, db: Session = Depends(ge
 def invite_admin(
     invitation_request: AdminInvitationRequest,
     current_user: User = Depends(PermissionChecker(Permission.ADMINS_MANAGE)),
-    db: Session = Depends(get_db)
-):
+    db: Session = Depends(get_db),
+) -> AdminInvitationResponse:
     auth_service = AuthService(db)
     # C3 FIX: Let custom exceptions propagate with correct status codes.
     return auth_service.create_admin_invitation(invitation_request, current_user)
@@ -142,17 +161,18 @@ def invite_admin(
     "/complete-signup",
     response_model=AuthResult,
     summary="Complete Admin Signup",
-    description="Complete admin signup using invitation token. Accepts token, name, and password in the request BODY (not query params)."
 )
 def complete_signup(
     body: CompleteSignupBody,
-    db: Session = Depends(get_db)
-):
-    # H4 FIX: Password is now in the request body, not in query parameters.
-    # Query parameters are logged in access logs, browser history, proxy logs, and CDN logs.
+    db: Session = Depends(get_db),
+) -> AuthResult:
     auth_service = AuthService(db)
-    # C3 FIX: Let custom exceptions propagate with correct status codes.
-    return auth_service.complete_admin_signup(body.token, body.name, body.password)
+
+    return auth_service.complete_admin_signup(
+        body.token,
+        body.name,
+        body.password,
+    )
 
 
 @router.post(
@@ -163,8 +183,8 @@ def complete_signup(
 def invalidate_admin(
     invalidate_request: InvalidateAdminRequest,
     current_user: User = Depends(PermissionChecker(Permission.ADMINS_MANAGE)),
-    db: Session = Depends(get_db)
-):
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
     auth_service = AuthService(db)
     # C3 FIX: Let custom exceptions propagate with correct status codes.
     auth_service.invalidate_admin(invalidate_request, current_user)
@@ -177,8 +197,29 @@ def invalidate_admin(
     description="Google OAuth is not yet implemented.",
     status_code=status.HTTP_501_NOT_IMPLEMENTED
 )
-def google_auth_placeholder():
+def google_auth_placeholder() -> dict[str, bool | str]:
     return {
         "success": False,
         "message": "Google OAuth is not yet implemented."
     }
+
+
+@router.get(
+    "/invitation/{token}",
+    summary="Verify invitation token"
+)
+def verify_invitation(
+    token: str,
+    db: Session = Depends(get_db),
+    ) -> dict[str, bool | str]:
+        auth_service = AuthService(db)
+
+        invitation = auth_service.verify_invitation_token(token)
+
+        return {
+            "valid": True,
+            "email": invitation.email,
+            "role": invitation.role.value
+            if hasattr(invitation.role, "value")
+            else invitation.role,
+        }

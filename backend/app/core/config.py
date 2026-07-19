@@ -27,10 +27,7 @@ class Settings(BaseSettings):
     DEBUG: bool = os.getenv("DEBUG", "false").lower() in ("true", "1", "yes")
 
     # Database
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL",
-        "sqlite:///./voting.db"  # Default fallback for local testing only
-    )
+    DATABASE_URL: str = os.getenv("DATABASE_URL","")
 
     # Redis — used for distributed rate limiting across multiple workers
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")

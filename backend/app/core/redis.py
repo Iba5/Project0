@@ -18,45 +18,58 @@ Usage:
 """
 
 import logging
+from redis.asyncio import Redis
 import redis as redis_lib
+
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Module-level singleton — created once on first import
-redis_client: redis_lib.Redis | None = None
+redis_client: Redis | None = None
 
 
-def init_redis() -> redis_lib.Redis:
-    """
-    Initialize and return the Redis connection.
-    Called once at application startup.
-    """
+async def init_redis() -> Redis | None:
     global redis_client
+
     if redis_client is None:
         try:
-            redis_client = redis_lib.Redis.from_url(
-                settings.REDIS_URL,
-                decode_responses=True,
-                socket_connect_timeout=5,
-                socket_timeout=5,
-                retry_on_timeout=True,
-                health_check_interval=30,
-            )
-            # Verify connection
-            redis_client.ping()
-            logger.info(f"Redis connected: {settings.REDIS_URL}")
+            redis_client = Redis.from_url( # pyright: ignore[reportUnknownMemberType]
+                    settings.REDIS_URL,
+                    decode_responses=True,
+                    socket_connect_timeout=5,
+                    socket_timeout=5,
+                    retry_on_timeout=True,
+                    health_check_interval=30,
+                )
+
+            redis_client.ping()# pyright: ignore[reportUnknownMemberType]
+
+            logger.info("Redis connected: %s", settings.REDIS_URL)
+
         except redis_lib.ConnectionError as e:
-            logger.error(f"Redis connection failed: {e}. Rate limiting will use in-memory fallback.")
+            logger.error(
+                "Redis connection failed: %s. Rate limiting will use in-memory fallback.",
+                e,
+            )
             redis_client = None
-    return redis_client
 
+    return redis_client 
 
-def get_redis():
-    """
-    FastAPI dependency that yields the Redis client.
-    Returns None if Redis is not available (allows graceful degradation).
-    """
+async def close_redis() -> None:
+    """Close the Redis connection."""
+    global redis_client
+
+    if redis_client is not None:
+        try:
+            await redis_client.aclose()
+            logger.info("Redis connection closed.")
+        except Exception:
+            logger.exception("Error while closing Redis.")
+        finally:
+            redis_client = None
+            
+async def get_redis() -> Redis | None:
     if redis_client is None:
-        init_redis()
+        await init_redis()
     return redis_client

@@ -5,7 +5,11 @@ import threading
 from typing import Dict, Tuple, Optional
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import (
+    BaseHTTPMiddleware,
+    RequestResponseEndpoint,
+)
+from redis.asyncio import Redis
 from starlette.responses import Response
 
 logger = logging.getLogger(__name__)
@@ -66,12 +70,11 @@ def _check_in_memory(
     return True
 
 
-def _check_redis_rate_limit(
-    redis_client, 
-    key: str, 
-    max_requests: int, 
-    window_seconds: int
-) -> bool:
+async def _check_redis_rate_limit(
+    redis_client: Redis,
+    key: str,
+    max_requests: int,
+    window_seconds: int,) -> bool | None:    
     """
     Redis-based sliding window rate limit using INCR + EXPIRE.
     Returns True if ALLOWED, False if blocked.
@@ -82,13 +85,16 @@ def _check_redis_rate_limit(
     - If count > max, block
     """
     try:
-        current = redis_client.incr(key)
+        current: int = await redis_client.incr(key)
         if current == 1:
-            redis_client.expire(key, window_seconds)
+            await redis_client.expire(key, window_seconds)
         return current <= max_requests
+
     except Exception as e:
-        logger.warning(f"Redis rate limit check failed for {key}: {e}. Falling back to in-memory.")
-        return None  # Signal that Redis failed
+        logger.warning(
+            f"Redis rate limit check failed for {key}: {e}. Falling back to in-memory."
+        )
+        return None
 
 
 class RateLimitingMiddleware(BaseHTTPMiddleware):
@@ -102,7 +108,11 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
     - Global: 60 requests/minute per IP
     - Payment /initiate: 10 requests/minute per IP (stricter)
     """
-    async def dispatch(self, request: Request, call_next) -> Response:
+    async def dispatch(
+    self,
+    request: Request,
+    call_next: RequestResponseEndpoint,
+    ) -> Response:
         client_ip = request.client.host if request.client else "127.0.0.1"
         path = request.url.path.lower()
 
@@ -144,15 +154,20 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
 
         return await call_next(request)
 
-    async def _check_redis(self, client_ip: str, is_payment_init: bool, redis_client) -> Optional[bool]:
+    async def _check_redis(
+    self,
+    client_ip: str,
+    is_payment_init: bool,
+    redis_client: Redis,
+    ) -> Optional[bool]:
         """Check rate limit via Redis. Returns True/False/None (error)."""
         try:
             if is_payment_init:
                 key = f"rl:payment:{client_ip}"
-                return _check_redis_rate_limit(redis_client, key, MAX_PAYMENT_REQUESTS_PER_WINDOW, PAYMENT_LIMIT_WINDOW_SECONDS)
+                return await _check_redis_rate_limit(redis_client, key, MAX_PAYMENT_REQUESTS_PER_WINDOW, PAYMENT_LIMIT_WINDOW_SECONDS)
             else:
                 key = f"rl:global:{client_ip}"
-                return _check_redis_rate_limit(redis_client, key, MAX_REQUESTS_PER_WINDOW, LIMIT_WINDOW_SECONDS)
+                return await _check_redis_rate_limit(redis_client, key, MAX_REQUESTS_PER_WINDOW, LIMIT_WINDOW_SECONDS)
         except Exception as e:
             logger.warning(f"Redis rate limit error: {e}")
             return None
@@ -185,7 +200,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
     Middleware generating unique request IDs, tracking duration,
     enforcing security headers, and writing standard logging formats.
     """
-    async def dispatch(self, request: Request, call_next) -> Response:
+    async def dispatch(self, request: Request, call_next:RequestResponseEndpoint) -> Response:
         request_id = str(uuid.uuid4())
         request.state.request_id = request_id
         

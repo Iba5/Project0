@@ -1,8 +1,7 @@
 import math
 from datetime import datetime, timezone
-from typing import List, Optional, Tuple, Type, TypeVar, Generic
-from sqlalchemy import func
-from sqlalchemy.orm import Session
+from typing import Any, List, Optional, Tuple, Type, TypeVar, Generic
+from sqlalchemy.orm import Session,Query
 from app.models.models import (
     User, Event, Participant, Payment, Activity, 
     SocialPlatformSync, Setting, VoteTransaction, AuditLog, Competition
@@ -11,6 +10,7 @@ from app.enums.enums import (
     EventStatus, ContestantStatus, SocialPlatform as PlatformEnum, 
     UserRole, CompetitionStatus, PaymentStatus
 )
+
 
 T = TypeVar("T")
 
@@ -24,10 +24,10 @@ class BaseRepository(Generic[T]):
     Integrates automatic soft-delete filtering for models supporting it.
     """
     def __init__(self, model: Type[T], db: Session):
-        self.model = model
+        self.model: Type[T] = model
         self.db = db
 
-    def _apply_soft_delete(self, query):
+    def _apply_soft_delete(self, query:Query[T])->Query[T]:
         """Apply soft-delete filter if model supports it."""
         deleted_at = getattr(self.model, "deleted_at", None)
         if deleted_at is not None:
@@ -141,7 +141,7 @@ class ParticipantRepository(BaseRepository[Participant]):
     def __init__(self, db: Session):
         super().__init__(Participant, db)
 
-    def get_by_ids(self, ids: set) -> List[Participant]:
+    def get_by_ids(self, ids: set[str]) -> List[Participant]:
         """Batch-fetch multiple participants in a single query, avoiding N+1 lookups."""
         if not ids:
             return []
@@ -150,7 +150,13 @@ class ParticipantRepository(BaseRepository[Participant]):
             query = query.filter(Participant.deleted_at.is_(None))
         return query.all()
 
-    def _filtered_query(self, search=None, status=None, platform=None, competition_id=None):
+    def _filtered_query(
+    self,
+    search: str | None = None,
+    status: ContestantStatus | None = None,
+    platform: PlatformEnum | None = None,
+    competition_id: str | None = None,
+) -> Query[Participant]:
         query = self._base_query()
         if search:
             # H5 FIX: Escape SQL LIKE wildcards (% and _) in user search input
@@ -188,7 +194,22 @@ class ParticipantRepository(BaseRepository[Participant]):
         if hasattr(Participant, "deleted_at"):
             query = query.filter(Participant.deleted_at.is_(None))
         return query.order_by(Participant.votes.desc()).all()
+    def get_public_leaderboard(
+    self,competition_id: str) -> List[Participant]|None:
+        """
+        Return the public leaderboard for a competition.
 
+        Only approved contestants are returned, ordered by vote count
+        from highest to lowest.
+        """
+        query = self._base_query().filter(
+            Participant.competition_id == competition_id,
+            Participant.status == ContestantStatus.APPROVED,
+        )
+        return (
+            query.order_by(Participant.votes.desc())
+            .all()
+        )
 
 class PaymentRepository(BaseRepository[Payment]):
     def __init__(self, db: Session):
@@ -288,7 +309,12 @@ class SettingsRepository:
 
 # --- Pagination helper ---
 
-def paginate_response(items: list, total: int, page: int, page_size: int) -> dict:
+def paginate_response(
+    items: list[Any],
+    total: int,
+    page: int,
+    page_size: int,
+) -> dict[str, Any]:
     """
     Build a standardized paginated response dict.
     

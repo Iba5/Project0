@@ -15,6 +15,33 @@ router = APIRouter()
 allow_read = Depends(PermissionChecker(Permission.CONTESTANTS_READ))
 allow_update = Depends(PermissionChecker(Permission.CONTESTANTS_UPDATE))
 
+@router.get("/public")
+def list_public_participants(
+    search: Optional[str] = None,
+    status: Optional[ContestantStatus] = None,
+    platform: Optional[SocialPlatform] = None,
+    competition_id: Optional[str] = None,
+    pagination: PaginationParams = Depends(),
+    db: Session = Depends(get_db),
+):
+    part_service = ParticipantService(db)
+
+    items, total = part_service.list_participants(
+        search,
+        status,
+        platform,
+        competition_id,
+        pagination.offset,
+        pagination.limit,
+    )
+
+    return paginate_response(
+        items,
+        total,
+        pagination.page,
+        pagination.page_size,
+    )
+
 @router.get(
     "/",
     summary="List and filter contestants (paginated)",

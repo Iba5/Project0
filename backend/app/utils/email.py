@@ -53,13 +53,21 @@ class EmailService:
             msg.attach(html_part)
 
             # Send email
+            logger.info(f"Sending email to {to_email}")
+
             with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+                logger.info("Connected to SMTP server")
+
                 server.starttls()
+                logger.info("TLS started")
                 server.login(self.smtp_user, self.smtp_password)
+                logger.info("Logged into SMTP")
+
                 server.send_message(msg)
-            
-            logger.info(f"Email sent successfully to {to_email}")
-            return True
+                logger.info("Message sent")
+                
+                logger.info(f"Email sent successfully to {to_email}")
+                return True
 
         except Exception as e:
             logger.error(f"Failed to send email to {to_email}: {str(e)}")
@@ -150,12 +158,15 @@ The Voting Platform Team
 
         return self.send_email(to_email, subject, html_content, text_content)
 
-    def send_admin_invitation_email(self, to_email: str, invitation_token: str, inviter_name: str) -> bool:
+    def send_admin_invitation_email(
+    self,
+    to_email: str,
+    invitation_link: str,
+    inviter_name: str,
+    )  -> bool:        
         """
         Send admin invitation email with signup link.
         """
-        invitation_link = f"{self.frontend_url}/signup?token={invitation_token}"
-        
         subject = "Admin Account Invitation"
         
         text_content = f"""

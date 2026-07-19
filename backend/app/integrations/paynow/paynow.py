@@ -1,5 +1,7 @@
+# pyright: reportMissingTypeStubs=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportAttributeAccessIssue=false
 import logging
-from typing import Optional, Dict, Any
+from decimal import Decimal
+from typing import Dict, Any
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -11,7 +13,7 @@ class PaynowClient:
     Handles payment creation, sending, mobile checkout, and status polling.
     Falls back to manual signature verification for webhook validation.
     """
-    def __init__(self):
+    def __init__(self) -> None:
         self.integration_id = settings.PAYNOW_INTEGRATION_ID
         self.integration_key = settings.PAYNOW_INTEGRATION_KEY
         self.result_url = settings.PAYNOW_RESULT_URL
@@ -48,22 +50,22 @@ class PaynowClient:
         return self._paynow
 
     def create_web_payment(
-        self, 
-        reference: str, 
-        email: str, 
-        item_name: str, 
-        amount
+        self,
+        reference: str,
+        email: str,
+        item_name: str,
+        amount: Decimal
     ) -> Dict[str, Any]:
         """
         Creates a web payment via Paynow and sends it.
         Returns dict with: success, redirect_url, poll_url, instructions
         """
         sdk = self._get_sdk()
-        
+
         payment = sdk.create_payment(reference, email)
         payment.add(item_name, amount)
         response = sdk.send(payment)
-        
+
         if response.success:
             logger.info(f"Paynow web payment initiated: ref={reference}, poll_url={response.poll_url}")
             return {
@@ -83,12 +85,12 @@ class PaynowClient:
             }
 
     def create_mobile_payment(
-        self, 
-        reference: str, 
-        email: str, 
-        item_name: str, 
-        amount, 
-        phone: str, 
+        self,
+        reference: str,
+        email: str,
+        item_name: str,
+        amount: Decimal,
+        phone: str,
         method: str = "ecocash"
     ) -> Dict[str, Any]:
         """
@@ -96,16 +98,16 @@ class PaynowClient:
         Supports ecocash and onemoney methods.
         """
         sdk = self._get_sdk()
-        
+
         method = method.lower().strip()
         if method not in ("ecocash", "onemoney"):
             logger.warning(f"Invalid mobile method '{method}', defaulting to ecocash")
             method = "ecocash"
-        
+
         payment = sdk.create_payment(reference, email)
         payment.add(item_name, amount)
         response = sdk.send_mobile(payment, phone, method)
-        
+
         if response.success:
             logger.info(f"Paynow mobile payment initiated: ref={reference}, phone={phone[:4]}***, method={method}")
             return {
@@ -130,7 +132,7 @@ class PaynowClient:
         This is the RECOMMENDED way to verify payments per Paynow docs.
         """
         sdk = self._get_sdk()
-        
+
         try:
             txn_status = sdk.check_transaction_status(poll_url)
             logger.info(f"Paynow status check via poll_url: paid={txn_status.paid}")
@@ -147,7 +149,7 @@ class PaynowClient:
 
     def generate_signature(self, fields: Dict[str, str]) -> str:
         """
-        Builds the Paynow API signature by joining sorted key values 
+        Builds the Paynow API signature by joining sorted key values
         and hashing the payload with SHA512 using the integration key.
         Used for webhook callback verification.
 
@@ -171,7 +173,7 @@ class PaynowClient:
     def verify_callback(self, fields: Dict[str, str]) -> bool:
         """
         Verifies the authenticity of status notification webhooks from Paynow.
-        
+
         SECURITY: In production, a valid SHA512 hash is MANDATORY.
         Callbacks without a hash are ALWAYS rejected to prevent forged
         payment notifications from crediting votes for free.
@@ -183,7 +185,7 @@ class PaynowClient:
                 "This is a potential forged callback attack."
             )
             return False
-        
+
         expected_hash = self.generate_signature(fields)
         # C2 FIX: Case-insensitive comparison. Paynow may send the hash
         # in either case depending on their implementation. Previously
@@ -196,5 +198,5 @@ class PaynowClient:
                 f"Expected: {expected_hash[:16]}..., Got: {incoming_hash[:16]}..."
             )
             return False
-        
+
         return True

@@ -1,40 +1,22 @@
-import { NextResponse } from "next/server"
-import type { NextRequest } from "next/server"
+import { NextRequest, NextResponse } from 'next/server'
 
-const PUBLIC_ROUTES = ["/login", "/signup", "/forgot-password"]
+const PUBLIC_ADMIN_PATHS = ['/admin/login', '/admin/forgot-password']
 
-// Protects admin routes by checking for the auth token cookie.
-export function proxy(request: NextRequest) {
-  const token = request.cookies.get("auth-token")?.value
+export default function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  const isPublicRoute = PUBLIC_ROUTES.some(
-    (route) => pathname === route || pathname.startsWith(`${route}/`)
-  )
-
-  // No token and trying to access a protected route → redirect to login.
-  if (!token && !isPublicRoute) {
-    const loginUrl = new URL("/login", request.url)
-    return NextResponse.redirect(loginUrl)
-  }
-
-  // Has token and trying to access auth pages → redirect to dashboard.
-  if (token && isPublicRoute) {
-    const dashboardUrl = new URL("/dashboard", request.url)
-    return NextResponse.redirect(dashboardUrl)
+  if (pathname.startsWith('/admin') && !PUBLIC_ADMIN_PATHS.some(p => pathname === p || pathname.startsWith(p + '/'))) {
+    const token = request.cookies.get('vw_session')?.value
+    if (!token) {
+      const loginUrl = new URL('/admin/login', request.url)
+      loginUrl.searchParams.set('next', pathname)
+      return NextResponse.redirect(loginUrl)
+    }
   }
 
   return NextResponse.next()
 }
 
 export const config = {
-  matcher: [
-    /*
-     * Match all paths except:
-     * - /api (backend-facing route handlers)
-     * - /_next (static assets and HMR)
-     * - /favicon.ico
-     */
-    "/((?!api|_next|favicon\\.ico).*)",
-  ],
+  matcher: ['/admin/:path*'],
 }

@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import type { ReactNode } from "react";
 import "./globals.css";
-import { Providers } from "@/app/providers";
+import { ThemeProvider } from "@/components/theme-provider";
+import { Toaster } from "@/components/ui/toaster";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -15,22 +15,33 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: {
-    default: "VibeWave Admin",
-    template: "%s | VibeWave Admin",
+  title: "VibeWave — Vote for Your Favourite Performer",
+  description:
+    "Digital entertainment voting platform. Watch, unlock, and vote for the performers you believe in.",
+  icons: {
+    icon: "/favicon.svg",
   },
-  description: "Admin dashboard for the digital entertainment competition platform.",
 };
 
 export default function RootLayout({
   children,
 }: Readonly<{
-  children: ReactNode;
+  children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`} suppressHydrationWarning>
-      <body className="min-h-screen bg-background text-foreground">
-        <Providers>{children}</Providers>
+    <html lang="en" suppressHydrationWarning>
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
+      >
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="light"
+          enableSystem
+          disableTransitionOnChange
+        >
+          {children}
+        </ThemeProvider>
+        <Toaster />
       </body>
     </html>
   );

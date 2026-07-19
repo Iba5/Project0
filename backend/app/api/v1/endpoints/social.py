@@ -1,12 +1,11 @@
-from typing import List, Optional
+from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.api.v1.dependencies import PermissionChecker
-from app.enums.enums import Permission, SocialPlatform, SocialSyncStatus, ALLOWED_SOURCE_PLATFORMS
+from app.enums.enums import Permission, ALLOWED_SOURCE_PLATFORMS
 from app.repositories.repositories import SocialPlatformRepository
-from app.schemas.schemas import SocialPlatformResponse
 
 router = APIRouter()
 
@@ -39,7 +38,7 @@ def get_social_status(db: Session = Depends(get_db)):
 def generate_voting_link(
     src: str = Query(..., description="Source platform: tiktok, facebook, instagram, youtube"),
     contestant_id: Optional[str] = Query(None, description="Optional contestant ID to pre-select"),
-):
+)->dict[str,Any]:
     """
     Generates a tracked voting link.
     Example output: https://platform.com/?src=tiktok&cid=abc123
@@ -73,7 +72,7 @@ def generate_voting_link(
     description="Returns aggregated traffic/vote counts by source_platform.",
     dependencies=[allow_read]
 )
-def get_traffic_analytics(db: Session = Depends(get_db)):
+def get_traffic_analytics(db: Session = Depends(get_db))->Dict[str,Any]:
     """
     Returns analytics on how many votes came from each social media platform.
     """

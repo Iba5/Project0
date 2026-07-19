@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
-from typing import Any, Union
-from jose import jwt
+from typing import Any, Dict, Union
+from jose import jwt,JWTError
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 from app.core.config import settings
@@ -23,7 +23,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return False
 
 def create_access_token(
-    subject: Union[str, Any], expires_delta: timedelta = None
+    subject: Union[str, Any], expires_delta: timedelta | None = None
 ) -> str:
     """
     Generates a JWT access token for a subject (e.g. user ID or email).
@@ -35,7 +35,7 @@ def create_access_token(
             minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
         )
     
-    to_encode = {
+    to_encode: Dict[str,Any] = {
         "exp": expire,
         "sub": str(subject)
     }
@@ -45,7 +45,7 @@ def create_access_token(
     )
     return encoded_jwt
 
-def decode_access_token(token: str) -> Union[dict, None]:
+def decode_access_token(token: str) -> Union[dict[str,Any], None]:
     """
     Decodes and validates a JWT access token.
     Returns the claims dict if valid, otherwise None.
@@ -55,5 +55,5 @@ def decode_access_token(token: str) -> Union[dict, None]:
             token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
         )
         return decoded
-    except jwt.JWTError:
+    except JWTError:
         return None

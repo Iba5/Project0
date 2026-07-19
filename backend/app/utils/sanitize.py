@@ -13,7 +13,7 @@ those metacharacters so search input is matched literally.
 MAX_SEARCH_LENGTH = 100
 
 
-def escape_like(value: str, escape_char: str = "\\") -> str:
+def escape_like(value: str|None=None, escape_char: str = "\\") -> str:
     """
     Escape the LIKE/ILIKE wildcard metacharacters in `value` so it matches
     literally when wrapped in a `%...%` pattern.

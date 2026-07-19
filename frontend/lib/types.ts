@@ -1,7 +1,93 @@
-export type ApiErrorShape = {
+export type UserRole = "Super Admin" | "Admin" | "Moderator"
+
+export type EventStatus =
+  | "Draft"
+  | "Upcoming"
+  | "Registration Open"
+  | "Voting Open"
+  | "Voting Closed"
+  | "Completed"
+  | "Archived"
+
+export type ContestantStatus =
+  | "Draft"
+  | "Submitted"
+  | "Under Review"
+  | "Approved"
+  | "Rejected"
+  | "Disqualified"
+  | "Archived"
+
+export type PaymentStatus =
+  | "Created"
+  | "Pending"
+  | "Processing"
+  | "Paid"
+  | "Failed"
+  | "Cancelled"
+  | "Refunded"
+  | "Expired"
+
+export type SocialPlatformType = "TikTok" | "Facebook" | "Instagram" | "YouTube"
+
+export type EventRecord = {
+  id: string
+  name: string
+  description: string | null
+  banner: string | null
+  startDate: string
+  endDate: string
+  status: EventStatus
+  votePrice: number
+  votesPerPayment: number
+  currency: string
+  votingOpens: string | null
+  votingCloses: string | null
+  publicLeaderboard: boolean
+  allowedCategories: string
+  allowedPlatforms: string
+}
+
+export type ParticipantRecord = {
+  id: string
+  name: string
+  category: string
+  platform: SocialPlatformType
+  videoUrl: string
+  status: ContestantStatus
+  votes: number
+  bio: string | null
+  imageUrl: string | null
+  eventId: string | null
+}
+
+export type PaymentRecord = {
+  id: string
+  reference: string
+  contestantId: string | null
+  contestantName?: string
+  amount: number
+  paymentMethod: string
+  status: PaymentStatus
+  date: string
+}
+
+export type ActivityRecord = {
+  id: string
+  title: string
+  detail: string | null
+  time: string
+}
+
+export type AuthResult = {
+  token: string
+  user: {
+    id: string
+    name: string
+    email: string
+    role: UserRole
+  }
   message: string
-  hint?: string
-  status?: number
 }
 
 export type DashboardSummary = {
@@ -11,71 +97,6 @@ export type DashboardSummary = {
   totalRevenue: string
   recentPayments: PaymentRecord[]
   recentActivity: ActivityRecord[]
-}
-
-export type EventStatus = "Upcoming" | "Ongoing" | "Expired"
-
-export type EventRecord = {
-  id: string
-  name: string
-  description: string
-  banner: string
-  startDate: string
-  endDate: string
-  status: EventStatus
-}
-
-export type ParticipantStatus = "Active" | "Pending" | "Suspended"
-
-export type ParticipantRecord = {
-  id: string
-  name: string
-  category: string
-  platform: "TikTok" | "Facebook" | "Instagram" | "YouTube"
-  videoUrl: string
-  status: ParticipantStatus
-  votes: number
-}
-
-export type PaymentStatus = "Pending" | "Successful" | "Failed"
-
-export type PaymentRecord = {
-  id: string
-  reference: string
-  contestant: string
-  amountCents: number
-  currency: string
-  paymentMethod: string
-  status: PaymentStatus
-  date: string
-}
-
-export type ActivityRecord = {
-  id: string
-  title: string
-  detail: string
-  time: string
-}
-
-export type SocialStatus = "Connected" | "Syncing" | "Failed" | "Disconnected"
-
-export type SocialPlatformRecord = {
-  id: string
-  platform: "TikTok" | "Facebook" | "Instagram" | "YouTube"
-  status: SocialStatus
-  lastSync: string
-  detail: string
-}
-
-export type AuthResult = {
-  token: string
-  user: {
-    id: string
-    name: string
-    email: string
-    role: string
-  }
-  message: string
 }
 
 export type SettingsProfile = {
@@ -89,11 +110,33 @@ export type SettingsProfile = {
   }
 }
 
-export type NotificationRecord = {
+export type PaymentMethodOption = {
   id: string
-  title: string
+  name: string
+  type: "mobile_money" | "card" | "digital_wallet"
+  isPrimary?: boolean
+}
+
+export type ViewName =
+  | "landing"
+  | "contestants"
+  | "contestant-detail"
+  | "payment"
+  | "leaderboard"
+  | "admin-login"
+  | "admin-dashboard"
+  | "admin-events"
+  | "admin-participants"
+  | "admin-payments"
+  | "admin-admins"
+  | "admin-settings"
+  | "admin-social-router"
+  | "admin-forgot-password"
+
+export type SocialPlatformStatus = {
+  id: string
+  platform: string
+  status: "Connected" | "Syncing" | "Failed" | "Disconnected"
+  lastSync: string
   detail: string
-  route: string
-  read: boolean
-  time: string
 }

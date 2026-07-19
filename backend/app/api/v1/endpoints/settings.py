@@ -1,11 +1,12 @@
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.api.v1.dependencies import PermissionChecker, get_current_active_user
+from app.api.v1.dependencies import PermissionChecker
 from app.enums.enums import Permission
 from app.services.services import SettingsService
-from app.schemas.schemas import SettingsProfileResponse, SettingsProfileUpdate
+from app.schemas.schemas import NotificationPreferences, SettingsProfileResponse, SettingsProfileUpdate
 from app.models.models import User
 
 router = APIRouter()
@@ -27,11 +28,11 @@ def get_settings(db: Session = Depends(get_db)):
         company_name=settings_row.company_name,
         support_email=settings_row.support_email,
         timezone=settings_row.timezone,
-        notifications={
-            "email": settings_row.email_notifications,
-            "sms": settings_row.sms_notifications,
-            "marketing": settings_row.marketing_notifications,
-        }
+        notifications=NotificationPreferences(
+            email=settings_row.email_notifications,
+            sms=settings_row.sms_notifications,
+            marketing=settings_row.marketing_notifications,
+        )
     )
 
 @router.put(
@@ -43,17 +44,17 @@ def update_settings(
     settings_in: SettingsProfileUpdate,
     current_user: User = allow_update,
     db: Session = Depends(get_db)
-):
+)->SettingsProfileResponse:
     settings_service = SettingsService(db, user_id=current_user.id)
     settings_row = settings_service.update_settings(settings_in)
     
     return SettingsProfileResponse(
-        company_name=settings_row.company_name,
-        support_email=settings_row.support_email,
-        timezone=settings_row.timezone,
-        notifications={
-            "email": settings_row.email_notifications,
-            "sms": settings_row.sms_notifications,
-            "marketing": settings_row.marketing_notifications,
-        }
+    company_name=settings_row.company_name,
+    support_email=settings_row.support_email,
+    timezone=settings_row.timezone,
+    notifications=  NotificationPreferences(
+            email=settings_row.email_notifications,
+            sms=settings_row.sms_notifications,
+            marketing=settings_row.marketing_notifications,
+        ),
     )

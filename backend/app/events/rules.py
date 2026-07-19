@@ -42,6 +42,16 @@ class EventRulesEngine:
         """
         Ensures a participant entry matches the event's allowed platforms list.
         """
-        allowed = [p.strip().lower() for p in event.allowed_platforms.split(",")]
+        if not event.allowed_platforms:
+            raise VotingException("No allowed platforms have been configured for this event.")
+
+        allowed = [
+            p.strip().lower()
+            for p in event.allowed_platforms.split(",")
+        ]
+
         if platform.lower() not in allowed:
-            raise VotingException(f"Platform {platform} is not allowed. Allowed platforms: {event.allowed_platforms}")
+            raise VotingException(
+                f"Platform {platform} is not allowed. "
+                f"Allowed platforms: {event.allowed_platforms}"
+            )

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional, Dict, Any, TypeVar, Generic
+from typing import List, Optional, TypeVar, Generic
 from pydantic import BaseModel, EmailStr, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
 from app.enums.enums import (
@@ -22,6 +22,10 @@ class PaginationMeta(BaseModel):
     has_next: bool
     has_prev: bool
 
+class AcceptInvitationBody(BaseModel):
+    token: str
+    name: str
+    password: str
 
 class PaginatedResponse(BaseModel, Generic[T]):
     """Generic wrapper for paginated list responses."""

@@ -2,27 +2,28 @@ import logging
 import uuid
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any, Tuple
+from sqlalchemy import select, update as sa_update, func
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from app.models.models import (
-    User, Event, Participant, Payment, Activity, 
-    SocialPlatformSync, Setting, VoteTransaction, Competition, AuditLog
+    User, Event, Participant, Payment, Competition, AuditLog, VoteTransaction
 )
 from app.enums.enums import (
-    UserRole, EventStatus, ContestantStatus, PaymentStatus, 
-    SocialPlatform as PlatformEnum, CompetitionStatus
+    UserRole, ContestantStatus, PaymentStatus,
+    SocialPlatform as PlatformEnum
 )
 from app.repositories.repositories import (
-    UserRepository, EventRepository, ParticipantRepository, 
-    PaymentRepository, ActivityRepository, SocialPlatformRepository, 
+    UserRepository, EventRepository, ParticipantRepository,
+    PaymentRepository, ActivityRepository,
     SettingsRepository, VoteTransactionRepository, CompetitionRepository
 )
 from app.core.security import hash_password, verify_password, create_access_token
 from app.schemas.schemas import (
     UserRegister, UserLogin, AuthResult, UserResponse,
     EventCreate, EventUpdate, ParticipantCreate, PaymentCreate, SettingsProfileUpdate,
-    ResetPasswordRequest, AdminInvitationRequest, AdminInvitationResponse, 
-    InvalidateAdminRequest, CompetitionCreate, CompetitionUpdate, CompetitionResponse,
+    ResetPasswordRequest, AdminInvitationRequest, AdminInvitationResponse,
+    InvalidateAdminRequest, CompetitionCreate, CompetitionUpdate,
     VoterCheckResponse, VoterDetailsUpdate, PaymentStatusCheckResponse
 )
 from app.audit.audit import AuditService
@@ -33,13 +34,12 @@ from app.exceptions.exceptions import (
     VotingException, ValidationException, NotFoundException, AuthenticationException, PaymentException
 )
 from app.utils.email import email_service
-from app.events.rules import EventRulesEngine
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# AuthService – unchanged core, kept as-is for stability
+# AuthService
 # ---------------------------------------------------------------------------
 
 class AuthService:
@@ -47,7 +47,7 @@ class AuthService:
     Handles user authentication, admin registrations, password resets, and JWT signing.
     Creates audit log records for login and authentication events.
     """
-    def __init__(self, db: Session):
+    def __init__(self, db: Session) -> None:
         self.db = db
         self.user_repo = UserRepository(db)
 
@@ -92,16 +92,21 @@ class AuthService:
 
     def login_admin(self, login_in: UserLogin, ip_address: Optional[str] = None) -> AuthResult:
         user = self.user_repo.get_by_email(login_in.email)
-        
-        # H2 FIX: Increment failed login counter and lock account after 5 failures
-        failed = False
-        if not user or not verify_password(login_in.password, user.hashed_password):
-            failed = True
-        
-        if not failed:
-            # Check account lock BEFORE checking is_active
-            if user.failed_login_count and user.failed_login_count >= 5:
-                if (user.locked_until and user.locked_until > datetime.now(timezone.utc)):
+
+        # H2 FIX: Increment failed login counter and lock account after 5 failures.
+        # `user` is Optional[User] here — every branch below must handle None
+        # explicitly before accessing user attributes, or Pylance (correctly)
+        # flags every subsequent user.X access as reportOptionalMemberAccess.
+        password_ok = user is not None and verify_password(login_in.password, user.hashed_password)
+
+        if user is not None and password_ok:
+            # Check account lock BEFORE checking is_active.
+            # failed_login_count/locked_until are non-Optional on the model
+            # (failed_login_count defaults to 0, not nullable), so no `and`
+            # guard is needed here — that guard was dead code Pylance flagged
+            # as reportUnnecessaryComparison.
+            if user.failed_login_count >= 5:
+                if user.locked_until is not None and user.locked_until > datetime.now(timezone.utc):
                     remaining_seconds = int((user.locked_until - datetime.now(timezone.utc)).total_seconds())
                     raise AuthenticationException(
                         f"Account temporarily locked due to too many failed attempts. "
@@ -112,15 +117,15 @@ class AuthService:
                     user.failed_login_count = 0
                     user.locked_until = None
 
-        if failed:
-            # Increment failed login counter
-            if user:
-                user.failed_login_count = (user.failed_login_count or 0) + 1
+        if user is None or not password_ok:
+            # Increment failed login counter on the existing user record, if any
+            if user is not None:
+                user.failed_login_count = user.failed_login_count + 1
                 # Lock account for 15 minutes after 5 failed attempts
                 if user.failed_login_count >= 5:
                     user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=15)
                 self.user_repo.update()
-            
+
             logger.warning(f"Failed login attempt for email: {login_in.email}")
             AuditService.log_action(
                 db=self.db,
@@ -130,16 +135,20 @@ class AuthService:
             )
             raise AuthenticationException("Invalid email or password.")
 
+        # From this point on, `user` is guaranteed non-None: either branch
+        # above raised, or we fell through with a valid, password-verified user.
+        assert user is not None
+
         if not user.is_active:
             raise AuthenticationException("User account is deactivated.")
 
         # Reset failed login counter on successful login
-        if user.failed_login_count and user.failed_login_count > 0:
+        if user.failed_login_count > 0:
             user.failed_login_count = 0
             user.locked_until = None
 
         logger.info(f"Admin logged in: {user.email}")
-        
+
         AuditService.log_action(
             db=self.db,
             action="Login",
@@ -147,7 +156,7 @@ class AuthService:
             ip_address=ip_address,
             details=f"Logged in successfully: {user.email}"
         )
-        
+
         token = create_access_token(user.id)
         return AuthResult(
             token=token,
@@ -174,17 +183,17 @@ class AuthService:
         if user:
             reset_token = str(uuid.uuid4())
             reset_token_expires = datetime.now(timezone.utc) + timedelta(hours=1)
-            
+
             user.reset_token = reset_token
             user.reset_token_expires = reset_token_expires
             self.user_repo.update()
-            
+
             email_sent = email_service.send_password_reset_email(
                 to_email=user.email,
                 reset_token=reset_token,
                 user_name=user.name
             )
-            
+
             logger.info(f"Password reset requested for: {email}, email sent: {email_sent}")
             AuditService.log_action(
                 db=self.db,
@@ -195,18 +204,27 @@ class AuthService:
 
     def reset_password(self, reset_request: ResetPasswordRequest) -> bool:
         user = self.user_repo.get_by_reset_token(reset_request.token)
-        
+
         if not user:
             raise AuthenticationException("Invalid or expired reset token")
-        
-        if user.reset_token_expires and user.reset_token_expires < datetime.now(timezone.utc):
-            raise AuthenticationException("Reset token has expired")
-        
+
+        expires = user.reset_token_expires
+
+        if expires is not None:
+            expires = (
+                expires.replace(tzinfo=timezone.utc)
+                if expires.tzinfo is None
+                else expires
+            )
+
+            if expires < datetime.now(timezone.utc):
+                raise AuthenticationException("Reset token has expired")
+
         user.hashed_password = hash_password(reset_request.new_password)
         user.reset_token = None
         user.reset_token_expires = None
         self.user_repo.update()
-        
+
         logger.info(f"Password reset completed for user: {user.email}")
         AuditService.log_action(
             db=self.db,
@@ -214,20 +232,20 @@ class AuthService:
             user_id=user.id,
             details=f"Password reset for {user.email}"
         )
-        
+
         return True
 
     def create_admin_invitation(self, invitation_request: AdminInvitationRequest, inviter_user: User) -> AdminInvitationResponse:
         if inviter_user.role != UserRole.SUPER_ADMIN:
             raise AuthenticationException("Only super admins can create admin invitations")
-        
+
         existing_user = self.user_repo.get_by_email(invitation_request.email)
         if existing_user:
             raise ValidationException("User with this email already exists")
-        
+
         invitation_token = str(uuid.uuid4())
         invitation_token_expires = datetime.now(timezone.utc) + timedelta(days=7)
-        
+
         new_user = User(
             name="Pending",
             email=invitation_request.email,
@@ -239,14 +257,14 @@ class AuthService:
             invited_by=inviter_user.id
         )
         self.user_repo.create(new_user)
-        
-        invitation_link = f"{email_service.frontend_url}/signup?token={invitation_token}"
+
+        invitation_link = f"{email_service.frontend_url}/accept-invitation?token={invitation_token}"
         email_sent = email_service.send_admin_invitation_email(
             to_email=invitation_request.email,
-            invitation_token=invitation_token,
-            inviter_name=inviter_user.name
-        )
-        
+            invitation_link=invitation_link,
+            inviter_name=inviter_user.name,
+            )
+
         logger.info(f"Admin invitation created for: {invitation_request.email}, email sent: {email_sent}")
         AuditService.log_action(
             db=self.db,
@@ -254,7 +272,7 @@ class AuthService:
             user_id=inviter_user.id,
             details=f"Invitation sent to {invitation_request.email} with role {invitation_request.role.value}"
         )
-        
+
         return AdminInvitationResponse(
             email=invitation_request.email,
             role=invitation_request.role,
@@ -264,20 +282,29 @@ class AuthService:
 
     def complete_admin_signup(self, token: str, name: str, password: str) -> AuthResult:
         user = self.user_repo.get_by_invitation_token(token)
-        
+
         if not user:
             raise AuthenticationException("Invalid or expired invitation token")
-        
-        if user.invitation_token_expires and user.invitation_token_expires < datetime.now(timezone.utc):
-            raise AuthenticationException("Invitation token has expired")
-        
+
+        expires = user.invitation_token_expires
+
+        if expires is not None:
+            expires = (
+                expires.replace(tzinfo=timezone.utc)
+                if expires.tzinfo is None
+                else expires
+            )
+
+            if expires < datetime.now(timezone.utc):
+                raise ValidationException("Invitation token has expired.")
+
         user.name = name
         user.hashed_password = hash_password(password)
         user.is_active = True
         user.invitation_token = None
         user.invitation_token_expires = None
         self.user_repo.update()
-        
+
         logger.info(f"Admin signup completed for: {user.email}")
         AuditService.log_action(
             db=self.db,
@@ -285,7 +312,7 @@ class AuthService:
             user_id=user.id,
             details=f"Admin account activated for {user.email}"
         )
-        
+
         token_jwt = create_access_token(user.id)
         return AuthResult(
             token=token_jwt,
@@ -301,20 +328,20 @@ class AuthService:
     def invalidate_admin(self, invalidate_request: InvalidateAdminRequest, current_user: User) -> None:
         if current_user.role != UserRole.SUPER_ADMIN:
             raise AuthenticationException("Only super admins can invalidate other admins")
-        
+
         if invalidate_request.admin_id == current_user.id:
             raise AuthenticationException("Cannot invalidate your own account")
-        
+
         target_user = self.user_repo.get_by_id(invalidate_request.admin_id)
         if not target_user:
             raise NotFoundException("Admin not found")
-        
+
         if target_user.role == UserRole.SUPER_ADMIN:
             raise AuthenticationException("Cannot invalidate super admin accounts")
-        
+
         target_user.is_active = False
         self.user_repo.update()
-        
+
         logger.info(f"Admin invalidated: {target_user.email} by {current_user.email}")
         AuditService.log_action(
             db=self.db,
@@ -323,38 +350,102 @@ class AuthService:
             details=f"Admin {target_user.email} was invalidated by {current_user.email}"
         )
 
+    def verify_invitation_token(self, token: str) -> User:
+        """
+        Verify that an invitation token is valid and return the invited user.
+        """
+
+        user = self.user_repo.get_by_invitation_token(token)
+
+        if user is None:
+            raise AuthenticationException(
+                "Invalid or expired invitation token."
+            )
+            
+        expires = user.invitation_token_expires
+
+        if expires is not None:
+            expires = (
+                expires.replace(tzinfo=timezone.utc)
+                if expires.tzinfo is None
+                else expires
+            )
+
+            if expires < datetime.now(timezone.utc):
+                raise AuthenticationException(
+                    "Invitation token has expired."
+                )
+        return user
+    
+    def accept_admin_invitation(
+        self,
+        token: str,
+        name: str,
+        password: str,
+    ) -> AuthResult:
+        """
+        Complete an invited administrator's signup.
+        """
+
+        user = self.verify_invitation_token(token)
+
+        user.name = name
+        user.hashed_password = hash_password(password)
+        user.is_active = True
+        user.invitation_token = None
+        user.invitation_token_expires = None
+
+        self.user_repo.update()
+
+        AuditService.log_action(
+            db=self.db,
+            action="Admin Invitation Accepted",
+            user_id=user.id,
+            details=f"Admin account activated for {user.email}"
+        )
+
+        jwt = create_access_token(user.id)
+
+        return AuthResult(
+            token=jwt,
+            user=UserResponse(
+                id=user.id,
+                name=user.name,
+                email=user.email,
+                role=user.role,
+            ),
+            message="Account activated successfully."
+        )
+
 
 # ---------------------------------------------------------------------------
-# DashboardService – unchanged
+# DashboardService
 # ---------------------------------------------------------------------------
 
 class DashboardService:
     """
-    Computes aggregated admin metrics: active events, vote counts, total revenue, 
+    Computes aggregated admin metrics: active events, vote counts, total revenue,
     and returns audit log data.
     H1 FIX: Uses SQL aggregation instead of loading all records into memory.
     """
-    def __init__(self, db: Session):
+    def __init__(self, db: Session) -> None:
         self.event_repo = EventRepository(db)
         self.participant_repo = ParticipantRepository(db)
         self.payment_repo = PaymentRepository(db)
         self.activity_repo = ActivityRepository(db)
         self.db = db
 
-    def get_summary(self):
-        from sqlalchemy import func
-        from app.models.models import Payment, Participant, Activity
-
+    def get_summary(self) -> Dict[str, Any]:
         active_event = self.event_repo.get_active_event()
         active_event_name = active_event.name if active_event else "No Active Event"
 
         # H1 FIX: Use SQL COUNT/SUM instead of loading all rows into Python
         total_participants = self.db.query(func.count(Participant.id)).filter(
-            Participant.deleted_at == None
+            Participant.deleted_at.is_(None)
         ).scalar() or 0
 
         total_votes = self.db.query(func.coalesce(func.sum(Participant.votes), 0)).filter(
-            Participant.deleted_at == None
+            Participant.deleted_at.is_(None)
         ).scalar() or 0
 
         total_revenue_result = self.db.query(func.coalesce(func.sum(Payment.amount), 0)).filter(
@@ -366,15 +457,15 @@ class DashboardService:
         recent_payment_rows = self.db.query(Payment).order_by(Payment.date.desc()).limit(5).all()
 
         contestant_ids = {p.contestant_id for p in recent_payment_rows if p.contestant_id}
-        contestants_map = {}
+        contestants_map: Dict[str, str] = {}
         if contestant_ids:
-            batch = self.participant_repo.get_by_ids(contestant_ids) if hasattr(self.participant_repo, 'get_by_ids') else []
+            batch = self.participant_repo.get_by_ids(contestant_ids)
             contestants_map = {c.id: c.name for c in batch}
 
-        recent_payments = []
+        recent_payments: List[Dict[str, Any]] = []
         for p in recent_payment_rows:
-            participant_name = contestants_map.get(p.contestant_id, "Unknown")
-            
+            participant_name = contestants_map.get(p.contestant_id, "Unknown") if p.contestant_id else "Unknown"
+
             recent_payments.append({
                 "id": p.id,
                 "reference": p.reference,
@@ -398,7 +489,7 @@ class DashboardService:
 
 
 # ---------------------------------------------------------------------------
-# CompetitionService – NEW
+# CompetitionService
 # ---------------------------------------------------------------------------
 
 class CompetitionService:
@@ -406,14 +497,13 @@ class CompetitionService:
     CRUD management for Competitions.
     Only one competition can be active at a time.
     """
-    def __init__(self, db: Session, user_id: Optional[str] = None):
+    def __init__(self, db: Session, user_id: Optional[str] = None) -> None:
         self.db = db
         self.user_id = user_id
         self.comp_repo = CompetitionRepository(db)
 
-    def list_competitions(self, offset: int = 0, limit: int = 100) -> dict:
-        items, total = self.comp_repo.get_all_paginated(offset, limit)
-        return items, total
+    def list_competitions(self, offset: int = 0, limit: int = 100) -> Tuple[List[Competition], int]:
+        return self.comp_repo.get_all_paginated(offset, limit)
 
     def get_competition(self, competition_id: str) -> Competition:
         comp = self.comp_repo.get_by_id(competition_id)
@@ -434,7 +524,7 @@ class CompetitionService:
             public_leaderboard=comp_in.public_leaderboard,
         )
         saved = self.comp_repo.create(new_comp)
-        
+
         AuditService.log_action(
             db=self.db,
             action="Competition Created",
@@ -447,14 +537,14 @@ class CompetitionService:
         comp = self.comp_repo.get_by_id(competition_id)
         if not comp:
             raise NotFoundException("Competition not found")
-        
+
         # L9 FIX: Only update fields that were actually provided (partial update)
         update_data = comp_in.model_dump(exclude_unset=True)
         for field, value in update_data.items():
             setattr(comp, field, value)
-        
+
         self.comp_repo.update()
-        
+
         AuditService.log_action(
             db=self.db,
             action="Competition Updated",
@@ -474,16 +564,15 @@ class CompetitionService:
             raise NotFoundException("Competition not found")
 
         # Deactivate all other active competitions in a single query
-        from sqlalchemy import update
         self.db.execute(
-            update(Competition)
-            .where(Competition.is_active == True, Competition.id != competition_id)
+            sa_update(Competition)
+            .where(Competition.is_active.is_(True), Competition.id != competition_id)
             .values(is_active=False)
         )
 
         comp.is_active = True
         self.comp_repo.update()
-        
+
         AuditService.log_action(
             db=self.db,
             action="Competition Activated",
@@ -497,7 +586,7 @@ class CompetitionService:
 
 
 # ---------------------------------------------------------------------------
-# EventService – updated to support competition_id
+# EventService
 # ---------------------------------------------------------------------------
 
 class EventService:
@@ -505,14 +594,13 @@ class EventService:
     CRUD management for entertainment competition events.
     Records audit actions on modifications.
     """
-    def __init__(self, db: Session, user_id: Optional[str] = None):
+    def __init__(self, db: Session, user_id: Optional[str] = None) -> None:
         self.db = db
         self.user_id = user_id
         self.event_repo = EventRepository(db)
 
-    def list_events(self, offset: int = 0, limit: int = 100) -> dict:
-        items, total = self.event_repo.get_all_paginated(offset, limit)
-        return items, total
+    def list_events(self, offset: int = 0, limit: int = 100) -> Tuple[List[Event], int]:
+        return self.event_repo.get_all_paginated(offset, limit)
 
     def get_event(self, event_id: str) -> Optional[Event]:
         event = self.event_repo.get_by_id(event_id)
@@ -542,7 +630,7 @@ class EventService:
             competition_id=event_in.competition_id,
         )
         saved = self.event_repo.create(new_event)
-        
+
         AuditService.log_action(
             db=self.db,
             action="Event Created",
@@ -555,14 +643,14 @@ class EventService:
         event = self.event_repo.get_by_id(event_id)
         if not event:
             raise NotFoundException("Event not found")
-        
+
         # L9 FIX: Only update fields that were actually provided (partial update)
         update_data = event_in.model_dump(exclude_unset=True)
         for field, value in update_data.items():
             setattr(event, field, value)
-        
+
         self.event_repo.update()
-        
+
         AuditService.log_action(
             db=self.db,
             action="Event Updated",
@@ -575,9 +663,9 @@ class EventService:
         event = self.event_repo.get_by_id(event_id)
         if not event:
             raise NotFoundException("Event not found")
-        
+
         self.event_repo.delete(event)
-        
+
         AuditService.log_action(
             db=self.db,
             action="Event Deleted",
@@ -587,7 +675,7 @@ class EventService:
 
 
 # ---------------------------------------------------------------------------
-# ParticipantService – updated to support competition_id
+# ParticipantService
 # ---------------------------------------------------------------------------
 
 class ParticipantService:
@@ -595,13 +683,13 @@ class ParticipantService:
     CRUD and approval actions for contestants.
     Soft-delete and Audit Logging aware.
     """
-    def __init__(self, db: Session, user_id: Optional[str] = None):
+    def __init__(self, db: Session, user_id: Optional[str] = None) -> None:
         self.db = db
         self.user_id = user_id
         self.part_repo = ParticipantRepository(db)
 
     def list_participants(
-        self, search: Optional[str] = None, status: Optional[ContestantStatus] = None, 
+        self, search: Optional[str] = None, status: Optional[ContestantStatus] = None,
         platform: Optional[PlatformEnum] = None, competition_id: Optional[str] = None,
         offset: int = 0, limit: int = 100
     ) -> Tuple[List[Participant], int]:
@@ -624,7 +712,7 @@ class ParticipantService:
             competition_id=part_in.competition_id,
         )
         saved = self.part_repo.create(new_part)
-        
+
         AuditService.log_action(
             db=self.db,
             action="Contestant Created",
@@ -637,11 +725,11 @@ class ParticipantService:
         part = self.part_repo.get_by_id(part_id)
         if not part:
             raise NotFoundException("Participant not found")
-        
+
         old_status = part.status
         part.status = status
         self.part_repo.update()
-        
+
         AuditService.log_action(
             db=self.db,
             action="Contestant Status Changed",
@@ -654,7 +742,7 @@ class ParticipantService:
         part = self.part_repo.get_by_id(part_id)
         if not part:
             raise NotFoundException("Participant not found")
-        
+
         self.part_repo.delete(part)
         AuditService.log_action(
             db=self.db,
@@ -671,10 +759,10 @@ class ParticipantService:
         if competition_id:
             participants = self.part_repo.get_by_competition(competition_id)
         else:
-            participants = self.part_repo.get_all()
-            participants = [p for p in participants if p.status == ContestantStatus.APPROVED]
+            all_participants = self.part_repo.get_all()
+            participants = [p for p in all_participants if p.status == ContestantStatus.APPROVED]
             participants.sort(key=lambda p: p.votes, reverse=True)
-        
+
         return [
             {
                 "id": p.id,
@@ -688,10 +776,16 @@ class ParticipantService:
             for p in participants
         ]
 
+    def get_public_leaderboard(self, competition_id: str):
+        return self.part_repo.get_public_leaderboard(competition_id)
+
 
 # ---------------------------------------------------------------------------
-# PaymentService – COMPLETELY REWRITTEN with Paynow SDK, voter verification,
-#                   competition scoping, source_platform, and ACID transactions
+# PaymentService
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# PaymentService
 # ---------------------------------------------------------------------------
 
 class PaymentService:
@@ -704,7 +798,7 @@ class PaymentService:
     5. Post-payment voter details collection
     6. Manual status check via poll_url
     """
-    def __init__(self, db: Session, user_id: Optional[str] = None):
+    def __init__(self, db: Session, user_id: Optional[str] = None) -> None:
         self.db = db
         self.user_id = user_id
         self.payment_repo = PaymentRepository(db)
@@ -729,24 +823,24 @@ class PaymentService:
             active_comp = self.comp_repo.get_active_competition()
             if active_comp:
                 comp_id = active_comp.id
-        
+
         if not comp_id:
             # No competition scope, allow without warning
             return VoterCheckResponse(
                 has_voted=False,
                 message="No active competition found. Proceeding without duplicate check."
             )
-        
+
         # Check for successful payments by this phone in this competition
         existing = self.payment_repo.get_by_voter_phone_and_competition(phone, comp_id)
-        
+
         if existing:
             return VoterCheckResponse(
                 has_voted=True,
                 message="Duplicate voter detected.",
                 warning="You have already voted in this competition. Continue only if you are paying for someone else."
             )
-        
+
         return VoterCheckResponse(
             has_voted=False,
             message="No previous votes found. You may proceed."
@@ -764,7 +858,7 @@ class PaymentService:
                 "Too many payment attempts. Please wait a few minutes before trying again."
             )
 
-    def initiate_payment(self, payment_in: PaymentCreate) -> dict:
+    def initiate_payment(self, payment_in: PaymentCreate) -> Dict[str, Any]:
         """
         INITIATE PAYMENT (Enhanced):
         1. Validates contestant exists
@@ -795,10 +889,10 @@ class PaymentService:
 
         # 2. Duplicate voter check
         voter_check = self.check_voter_duplicate(
-            payment_in.voter_phone, 
+            payment_in.voter_phone,
             payment_in.competition_id
         )
-        
+
         if voter_check.has_voted and not payment_in.acknowledge_duplicate:
             # Return the warning but do NOT proceed with payment
             return {
@@ -843,7 +937,7 @@ class PaymentService:
 
         # Determine payment type (web vs mobile)
         is_mobile = payment_in.payment_method.lower() in ("ecocash", "onemoney")
-        
+
         # 7. Create local payment record with SERVER-DETERMINED amount
         pending_payment = Payment(
             reference=reference,
@@ -858,11 +952,11 @@ class PaymentService:
             duplicate_vote_acknowledged=payment_in.acknowledge_duplicate,
         )
         # Don't commit yet — we'll commit after Paynow confirms creation
-        
+
         # 8. Call Paynow SDK with SERVER-DETERMINED amount
         item_name = f"Vote for {part.name}"
         voter_email = payment_in.voter_email or "voter@platform.com"
-        
+
         try:
             if is_mobile:
                 paynow_response = self.paynow_client.create_mobile_payment(
@@ -904,9 +998,9 @@ class PaymentService:
         pending_payment.poll_url = paynow_response.get("poll_url")
         pending_payment.paynow_redirect_url = paynow_response.get("redirect_url")
         pending_payment.status = PaymentStatus.PENDING
-        
+
         self.payment_repo.create(pending_payment)
-        
+
         AuditService.log_action(
             db=self.db,
             action="Payment Created",
@@ -923,10 +1017,10 @@ class PaymentService:
             "pollUrl": paynow_response.get("poll_url"),
         }
 
-    def process_paynow_callback(self, callback_data: dict) -> None:
+    def process_paynow_callback(self, callback_data: Dict[str, Any]) -> None:
         """
         CRITICAL PAYMENT VERIFICATION FLOW (Idempotent, ACID, Dual Verification):
-        
+
         1. Verify Webhook Signature (SHA512 hash)
         2. Check Idempotency (prevent double voting)
         3. Cross-reference reference with internal payment
@@ -939,8 +1033,8 @@ class PaymentService:
         6. Commit atomically — rollback on ANY failure
         7. Log security audit
         """
-        reference = callback_data.get("reference")
-        paynow_status = callback_data.get("status")
+        reference: Optional[str] = callback_data.get("reference")
+        paynow_status: Optional[str] = callback_data.get("status")
 
         # --- 1. Verify webhook signature ---
         if not self.paynow_client.verify_callback(callback_data):
@@ -952,10 +1046,12 @@ class PaymentService:
             )
             raise VotingException("Signature check failed")
 
+        if not reference:
+            raise NotFoundException("Payment reference missing from callback payload")
+
         # --- 2. Cross-reference with internal payment AND lock the row ---
         # C1 FIX: Use select_for_update() to prevent concurrent webhook + manual poll
         # from both passing idempotency checks and double-crediting votes.
-        from sqlalchemy import select
         payment = self.db.execute(
             select(Payment).where(Payment.reference == reference).with_for_update()
         ).scalar_one_or_none()
@@ -989,22 +1085,27 @@ class PaymentService:
 
         # --- 5. ACID Transaction Block ---
         try:
-            if paynow_status and paynow_status.lower() in ("paid", "successful"):
+            if paynow_status is not None and paynow_status.lower() in ("paid", "successful"):
                 # H3 FIX: Compute votes_to_add BEFORE fraud check.
                 # Previously used int(payment.amount) — a monetary value —
                 # compared against MAX_VOTES_PER_TRANSACTION.
                 votes_to_add = 1
                 if payment.competition_id:
                     comp = self.comp_repo.get_by_id(payment.competition_id)
-                    if comp and comp.votes_per_payment is not None:
+                    if comp:
                         votes_to_add = comp.votes_per_payment
+
+                if not payment.contestant_id:
+                    raise VotingException(
+                        f"Payment {reference} has no associated contestant; cannot credit votes."
+                    )
 
                 # Fraud detection — now uses correct vote count
                 self.fraud_service.detect_suspicious_voting(payment.contestant_id, votes_to_add)
-                
+
                 # Update payment status
                 payment.status = PaymentStatus.PAID
-                
+
                 vote_txn = VoteTransaction(
                     payment_id=payment.id,
                     contestant_id=payment.contestant_id,
@@ -1012,25 +1113,23 @@ class PaymentService:
                     competition_id=payment.competition_id,
                 )
                 self.db.add(vote_txn)
-                
+
                 # H1 FIX: Atomic vote increment via SQL UPDATE.
                 # Previously: contestant.votes += votes_to_add (read-modify-write).
                 # Two concurrent callbacks for the same contestant could both
                 # read votes=100, both write votes=101, losing one vote.
-                if payment.contestant_id:
-                    from sqlalchemy import update as sa_update
-                    result = self.db.execute(
-                        sa_update(Participant)
-                        .where(Participant.id == payment.contestant_id,
-                               Participant.deleted_at == None)
-                        .values(votes=Participant.votes + votes_to_add)
+                result: CursorResult[Any] = self.db.execute(  # type: ignore[assignment]
+                    sa_update(Participant)
+                    .where(Participant.id == payment.contestant_id,
+                           Participant.deleted_at.is_(None))
+                    .values(votes=Participant.votes + votes_to_add)
+                )
+                if result.rowcount == 0:
+                    raise VotingException(
+                        f"Contestant {payment.contestant_id} not found or soft-deleted. "
+                        f"Payment {reference} was paid but no votes were credited."
                     )
-                    if result.rowcount == 0:
-                        raise VotingException(
-                            f"Contestant {payment.contestant_id} not found or soft-deleted. "
-                            f"Payment {reference} was paid but no votes were credited."
-                        )
-                
+
                 audit_entry = AuditLog(
                     action="Payment Verified",
                     details=(
@@ -1040,13 +1139,13 @@ class PaymentService:
                     )
                 )
                 self.db.add(audit_entry)
-                
+
                 # COMMIT — atomic
                 self.db.commit()
                 logger.info(f"Transaction committed successfully. reference: {reference}.")
             else:
                 payment.status = PaymentStatus.FAILED
-                
+
                 # Audit log for failure (use direct SQL insert to stay inside transaction)
                 audit_entry = AuditLog(
                     action="Payment Failed",
@@ -1064,17 +1163,15 @@ class PaymentService:
         MANUAL STATUS CHECK:
         Allows the frontend to manually poll the payment status.
         Uses the saved poll_url to actively verify with Paynow.
-        
+
         Uses select_for_update() to prevent concurrent requests from
         crediting the same vote twice (H5 race condition fix).
         """
-        # Use with_for_update to lock the payment row and prevent concurrent vote crediting
         payment = self.payment_repo.get_by_reference(reference)
         if not payment:
             raise NotFoundException(f"Payment reference {reference} not found")
 
         # Re-fetch with row-level lock for PostgreSQL (no-op on SQLite but harmless)
-        from sqlalchemy import select
         payment = self.db.execute(
             select(Payment).where(Payment.id == payment.id).with_for_update()
         ).scalar_one()
@@ -1097,11 +1194,11 @@ class PaymentService:
                         votes_to_add = 1
                         if payment.competition_id:
                             comp = self.comp_repo.get_by_id(payment.competition_id)
-                            if comp and comp.votes_per_payment is not None:
+                            if comp:
                                 votes_to_add = comp.votes_per_payment
-                        
+
                         payment.status = PaymentStatus.PAID
-                        
+
                         # Check idempotency — has a vote txn already been created?
                         existing_vote = self.vote_repo.get_by_payment_id(payment.id)
                         if not existing_vote:
@@ -1112,23 +1209,22 @@ class PaymentService:
                                 competition_id=payment.competition_id,
                             )
                             self.db.add(vote_txn)
-                            
+
                         # H1 FIX: Same atomic SQL UPDATE as callback path
                         if payment.contestant_id:
-                            from sqlalchemy import update as sa_update
                             self.db.execute(
                                 sa_update(Participant)
                                 .where(Participant.id == payment.contestant_id,
-                                       Participant.deleted_at == None)
+                                       Participant.deleted_at.is_(None))
                                 .values(votes=Participant.votes + votes_to_add)
                             )
-                        
+
                         self.db.commit()
                         logger.info(f"Manual poll confirmed PAID for ref: {reference}")
                     except Exception:
                         self.db.rollback()
                         raise
-                    
+
                     return PaymentStatusCheckResponse(
                         reference=reference,
                         status=PaymentStatus.PAID,
@@ -1137,13 +1233,17 @@ class PaymentService:
             except Exception as e:
                 logger.warning(f"Manual status check failed for {reference}: {str(e)}")
 
+        # NOTE: payment.status can only be CREATED, PENDING, or PROCESSING at
+        # this point — all terminal states (PAID, FAILED, CANCELLED, REFUNDED,
+        # EXPIRED) were already returned above. So `paid` is always False here;
+        # this is not a bug, just documenting why it's a constant.
         return PaymentStatusCheckResponse(
             reference=reference,
             status=payment.status,
-            paid=(payment.status == PaymentStatus.PAID)
+            paid=False
         )
 
-    def update_voter_details(self, details_in: VoterDetailsUpdate) -> dict:
+    def update_voter_details(self, details_in: VoterDetailsUpdate) -> Dict[str, Any]:
         """
         POST-PAYMENT VOTER DETAILS COLLECTION:
         After a successful payment, the voter may provide name/email
@@ -1156,7 +1256,7 @@ class PaymentService:
         if payment.status != PaymentStatus.PAID:
             raise PaymentException("Voter details can only be updated for successful payments.")
 
-        updated_fields = []
+        updated_fields: List[str] = []
         if details_in.voter_name:
             payment.voter_name = details_in.voter_name
             updated_fields.append(f"name={details_in.voter_name}")
@@ -1181,7 +1281,7 @@ class PaymentService:
             "message": "Voter details updated successfully."
         }
 
-    def list_payments(self, offset: int = 0, limit: int = 100) -> dict:
+    def list_payments(self, offset: int = 0, limit: int = 100) -> Tuple[List[Dict[str, Any]], int]:
         """
         Returns paginated payment records with contestant names attached.
         PRIVACY: voter_phone and voter_email are NOT included in responses.
@@ -1190,13 +1290,13 @@ class PaymentService:
 
         contestant_ids = {p.contestant_id for p in payments if p.contestant_id}
         contestants = self.part_repo.get_by_ids(contestant_ids) if contestant_ids else []
-        name_by_id = {c.id: c.name for c in contestants}
+        name_by_id: Dict[str, str] = {c.id: c.name for c in contestants}
 
-        items = [
+        items: List[Dict[str, Any]] = [
             {
                 "id": p.id,
                 "reference": p.reference,
-                "contestant": name_by_id.get(p.contestant_id, "Unknown"),
+                "contestant": name_by_id.get(p.contestant_id, "Unknown") if p.contestant_id else "Unknown",
                 "amount": f"${p.amount:.2f}",
                 "paymentMethod": p.payment_method,
                 "status": p.status,
@@ -1211,7 +1311,7 @@ class PaymentService:
 
 
 # ---------------------------------------------------------------------------
-# SettingsService – unchanged
+# SettingsService
 # ---------------------------------------------------------------------------
 
 class SettingsService:
@@ -1219,26 +1319,26 @@ class SettingsService:
     Administrative customization settings service.
     Writes audit records when platform preferences are changed.
     """
-    def __init__(self, db: Session, user_id: Optional[str] = None):
+    def __init__(self, db: Session, user_id: Optional[str] = None) -> None:
         self.db = db
         self.user_id = user_id
         self.settings_repo = SettingsRepository(db)
 
-    def get_settings(self) -> Setting:
+    def get_settings(self):
         return self.settings_repo.get_settings()
 
-    def update_settings(self, settings_in: SettingsProfileUpdate) -> Setting:
+    def update_settings(self, settings_in: SettingsProfileUpdate):
         settings = self.settings_repo.get_settings()
-        
+
         settings.company_name = settings_in.company_name
         settings.support_email = settings_in.support_email
         settings.timezone = settings_in.timezone
         settings.email_notifications = settings_in.notifications.email
         settings.sms_notifications = settings_in.notifications.sms
         settings.marketing_notifications = settings_in.notifications.marketing
-        
+
         saved = self.settings_repo.update_settings(settings)
-        
+
         AuditService.log_action(
             db=self.db,
             action="Settings Changed",
