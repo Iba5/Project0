@@ -19,7 +19,7 @@ Usage:
 
 import logging
 from redis.asyncio import Redis
-import redis as redis_lib
+from redis.exceptions import ConnectionError
 
 
 from app.core.config import settings
@@ -43,11 +43,11 @@ async def init_redis() -> Redis | None:
                     health_check_interval=30,
                 )
 
-            redis_client.ping()# pyright: ignore[reportUnknownMemberType]
+            await redis_client.ping()# pyright: ignore[reportUnknownMemberType]
 
-            logger.info("Redis connected: %s", settings.REDIS_URL)
+            logger.info("Redis connected successfully")
 
-        except redis_lib.ConnectionError as e:
+        except ConnectionError as e:
             logger.error(
                 "Redis connection failed: %s. Rate limiting will use in-memory fallback.",
                 e,
@@ -69,7 +69,10 @@ async def close_redis() -> None:
         finally:
             redis_client = None
             
-async def get_redis() -> Redis | None:
+async def get_redis() -> Redis:
     if redis_client is None:
-        await init_redis()
+        client = await init_redis()
+        if client is None:
+            raise RuntimeError("Redis is unavailable")
+    assert redis_client is not None
     return redis_client
