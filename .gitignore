@@ -125,3 +125,5 @@ media/
 .cursor/
 .codex/
 .zcode/
+.vercel
+.env*
