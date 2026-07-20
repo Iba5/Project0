@@ -1,6 +1,4 @@
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import resend
 from typing import Optional
 import logging
 from app.core.config import settings
@@ -9,18 +7,21 @@ logger = logging.getLogger(__name__)
 
 class EmailService:
     """
-    Service for sending emails using SMTP.
+    Service for sending emails using Resend (HTTPS API).
     Handles password reset emails and admin invitation emails.
+
+    Uses Resend instead of raw SMTP because Railway blocks outbound
+    SMTP ports (25/465/587) on Free/Trial/Hobby plans. Resend sends
+    over HTTPS (443), which is never blocked.
     """
-    
+
     def __init__(self):
-        self.smtp_host = settings.SMTP_HOST
-        self.smtp_port = settings.SMTP_PORT
-        self.smtp_user = settings.SMTP_USER
-        self.smtp_password = settings.SMTP_PASSWORD
+        self.api_key = settings.RESEND_API_KEY
         self.from_email = settings.SMTP_FROM_EMAIL
         self.from_name = settings.SMTP_FROM_NAME
         self.frontend_url = settings.FRONTEND_URL
+        if self.api_key:
+            resend.api_key = self.api_key
 
     def send_email(
         self,
@@ -30,44 +31,28 @@ class EmailService:
         text_content: Optional[str] = None
     ) -> bool:
         """
-        Send an email using SMTP.
+        Send an email using Resend's HTTPS API.
         Returns True if successful, False otherwise.
         """
-        if not all([self.smtp_host, self.smtp_user, self.smtp_password, self.from_email]):
+        if not all([self.api_key, self.from_email]):
             logger.warning("Email configuration incomplete. Skipping email send.")
             return False
 
         try:
-            # Create message
-            msg = MIMEMultipart('alternative')
-            msg['From'] = f"{self.from_name} <{self.from_email}>"
-            msg['To'] = to_email
-            msg['Subject'] = subject
-
-            # Add text and HTML parts
-            if text_content:
-                text_part = MIMEText(text_content, 'plain')
-                msg.attach(text_part)
-            
-            html_part = MIMEText(html_content, 'html')
-            msg.attach(html_part)
-
-            # Send email
             logger.info(f"Sending email to {to_email}")
 
-            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
-                logger.info("Connected to SMTP server")
+            params: resend.Emails.SendParams = {
+                "from": f"{self.from_name} <{self.from_email}>",
+                "to": [to_email],
+                "subject": subject,
+                "html": html_content,
+            }
+            if text_content:
+                params["text"] = text_content
 
-                server.starttls()
-                logger.info("TLS started")
-                server.login(self.smtp_user, self.smtp_password)
-                logger.info("Logged into SMTP")
-
-                server.send_message(msg)
-                logger.info("Message sent")
-                
-                logger.info(f"Email sent successfully to {to_email}")
-                return True
+            result = resend.Emails.send(params)
+            logger.info(f"Email sent successfully to {to_email} (id: {result.get('id')})")
+            return True
 
         except Exception as e:
             logger.error(f"Failed to send email to {to_email}: {str(e)}")

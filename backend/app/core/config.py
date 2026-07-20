@@ -52,11 +52,8 @@ class Settings(BaseSettings):
     PAYNOW_RESULT_URL: str = os.getenv("PAYNOW_RESULT_URL", "")
     PAYNOW_RETURN_URL: str = os.getenv("PAYNOW_RETURN_URL", "")
 
-    # Email Configuration
-    SMTP_HOST: str = os.getenv("SMTP_HOST", "smtp.gmail.com")
-    SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
-    SMTP_USER: str = os.getenv("SMTP_USER", "")
-    SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
+    # Email Configuration (Resend HTTPS API — Railway blocks raw SMTP ports)
+    RESEND_API_KEY: str = os.getenv("RESEND_API_KEY", "")
     SMTP_FROM_EMAIL: str = os.getenv("SMTP_FROM_EMAIL", "")
     SMTP_FROM_NAME: str = os.getenv("SMTP_FROM_NAME", "Voting Platform")
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
