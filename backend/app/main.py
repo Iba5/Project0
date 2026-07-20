@@ -87,11 +87,6 @@ app.add_middleware(
     RequestLoggingMiddleware
 )
 
-# Redirect to HTTPS in production
-if not settings.DEBUG:
-    from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
-    app.add_middleware(HTTPSRedirectMiddleware)
-
 # Global router inclusion
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
