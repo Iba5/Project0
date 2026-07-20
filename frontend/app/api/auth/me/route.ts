@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ user: null }, { status: 401 })
     }
 
-    const res = await fetch(`${API_URL}/dashboard`, {
+    const res = await fetch(`${API_URL}/dashboard/`, {
       headers: { 'Authorization': `Bearer ${token}` },
     })
 
