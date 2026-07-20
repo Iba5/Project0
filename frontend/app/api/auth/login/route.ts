@@ -11,7 +11,13 @@ export async function POST(request: NextRequest) {
       body: JSON.stringify(body),
     })
 
-    const data = await res.json()
+    const rawBody = await res.text()
+    let data: any
+    try {
+      data = JSON.parse(rawBody)
+    } catch {
+      data = { success: false, message: rawBody || 'Unexpected response from backend.' }
+    }
 
     if (!res.ok) {
       return NextResponse.json(data, { status: res.status })
