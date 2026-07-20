@@ -11,7 +11,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     ...(options.headers as Record<string, string>),
   }
 
-  const res = await fetch(`${PROXY_BASE}/${path}`, { ...options, headers })
+  const cleanPath = path.replace(/^\/+/, '')
+  const res = await fetch(`${PROXY_BASE}/${cleanPath}`, { ...options, headers })
 
   if (!res.ok) {
     if (res.status === 401) {

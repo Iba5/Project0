@@ -27,7 +27,7 @@ async function proxyRequest(
 ) {
   const { path } = await paramsPromise
   const token = request.cookies.get('vw_session')?.value
-  const backendPath = path.join('/')
+  const backendPath = path.filter(Boolean).join('/')
   const url = `${API_URL}/${backendPath}${request.nextUrl.search}`
 
   const headers: Record<string, string> = {}
