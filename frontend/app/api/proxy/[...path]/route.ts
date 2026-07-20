@@ -27,8 +27,21 @@ async function proxyRequest(
 ) {
   const { path } = await paramsPromise
   const token = request.cookies.get('vw_session')?.value
-  const backendPath = path.filter(Boolean).join('/')
-  const url = `${API_URL}/${backendPath}${request.nextUrl.search}`
+  const cleanSegments = path.filter(Boolean)
+  const backendPath = cleanSegments.join('/')
+
+  // Backend routes mounted at "" under these prefixes require a trailing
+  // slash when called with no sub-path (e.g. GET /dashboard/, not /dashboard).
+  // Adding it here (server-side, after Next's own routing already resolved
+  // the request) avoids Next.js canonicalizing away a trailing slash on the
+  // client-facing /api/proxy/* URL.
+  const SLASH_REQUIRED_ROOTS = new Set([
+    'dashboard', 'events', 'participants', 'payments', 'settings', 'social-router',
+  ])
+  const needsTrailingSlash =
+    cleanSegments.length === 1 && SLASH_REQUIRED_ROOTS.has(cleanSegments[0])
+
+  const url = `${API_URL}/${backendPath}${needsTrailingSlash ? '/' : ''}${request.nextUrl.search}`
 
   const headers: Record<string, string> = {}
   if (token) headers['Authorization'] = `Bearer ${token}`

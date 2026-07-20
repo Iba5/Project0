@@ -190,16 +190,16 @@ export function resetPassword(token: string, password: string) {
 }
 // --- Dashboard ---
 export function getDashboardSummary() {
-  return request<DashboardSummaryApi>('/dashboard/')
+  return request<DashboardSummaryApi>('/dashboard')
 }
 
 // --- Events ---
 export function listEvents() {
-  return request<EventApi[]>('/events/')
+  return request<EventApi[]>('/events')
 }
 
 export function createEvent(data: EventCreateApi) {
-  return request<EventApi>('/events/', {
+  return request<EventApi>('/events', {
     method: 'POST',
     body: JSON.stringify(data),
   })
@@ -227,7 +227,7 @@ export function listParticipants(params?: {
   if (params?.status) qs.set('status', params.status)
   if (params?.platform) qs.set('platform', params.platform)
   const q = qs.toString()
-  return request<ParticipantApi[]>(`/participants/${q ? `?${q}` : ''}`)
+  return request<ParticipantApi[]>(`/participants${q ? `?${q}` : ''}`)
 }
 
 export function getParticipant(id: string) {
@@ -235,7 +235,7 @@ export function getParticipant(id: string) {
 }
 
 export function createParticipant(data: ParticipantCreateApi) {
-  return request<ParticipantApi>('/participants/', {
+  return request<ParticipantApi>('/participants', {
     method: 'POST',
     body: JSON.stringify(data),
   })
@@ -250,7 +250,7 @@ export function updateParticipantStatus(id: string, status: string) {
 
 // --- Payments ---
 export function listPayments() {
-  return request<PaymentApi[]>('/payments/')
+  return request<PaymentApi[]>('/payments')
 }
 
 export function initiatePayment(data: {
@@ -266,11 +266,11 @@ export function initiatePayment(data: {
 
 // --- Settings ---
 export function getSettings() {
-  return request<SettingsApi>('/settings/')
+  return request<SettingsApi>('/settings')
 }
 
 export function updateSettings(data: SettingsUpdateApi) {
-  return request<SettingsApi>('/settings/', {
+  return request<SettingsApi>('/settings', {
     method: 'PUT',
     body: JSON.stringify(data),
   })
@@ -278,7 +278,7 @@ export function updateSettings(data: SettingsUpdateApi) {
 
 // --- Social Router ---
 export function getSocialPlatforms() {
-  return request<{ items: SocialPlatformApi[] }>('/social-router/')
+  return request<{ items: SocialPlatformApi[] }>('/social-router')
 }
 
 // --- Admins ---
