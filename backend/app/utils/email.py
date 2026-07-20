@@ -12,7 +12,8 @@ class EmailService:
 
     Uses Resend instead of raw SMTP because Railway blocks outbound
     SMTP ports (25/465/587) on Free/Trial/Hobby plans. Resend sends
-    over HTTPS (443), which is never blocked.
+    over HTTPS (443), which is never blocked. Sends from a verified
+    domain (votingsdesign.store), so mail can go to any recipient.
     """
 
     def __init__(self):
