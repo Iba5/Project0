@@ -5,7 +5,7 @@ from pydantic.alias_generators import to_camel
 from app.enums.enums import (
     UserRole, EventStatus, ContestantStatus, PaymentStatus, 
     SocialPlatform, SocialSyncStatus, CompetitionStatus, SourcePlatform,
-    ALLOWED_SOURCE_PLATFORMS
+    ALLOWED_SOURCE_PLATFORMS, PaymentMethod, PaymentMethodType
 )
 
 T = TypeVar("T")
@@ -78,6 +78,7 @@ class UserResponse(CamelModel):
 
 class AuthResult(CamelModel):
     token: str
+    refresh_token: Optional[str] = None
     user: UserResponse
     message: str
 
@@ -335,6 +336,39 @@ class SettingsProfileResponse(CamelModel):
     support_email: EmailStr
     timezone: str
     notifications: NotificationPreferences
+
+# --- Payment Method Configuration Schemas ---
+
+class PaymentMethodConfigCreate(CamelModel):
+    method: str
+    method_type: str
+    display_name: str
+    description: Optional[str] = None
+    is_enabled: bool = True
+    sort_order: int = 0
+    icon_name: Optional[str] = None
+    config_data: Optional[dict] = None
+
+class PaymentMethodConfigUpdate(CamelModel):
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    is_enabled: Optional[bool] = None
+    sort_order: Optional[int] = None
+    icon_name: Optional[str] = None
+    config_data: Optional[dict] = None
+
+class PaymentMethodConfigResponse(CamelModel):
+    id: str
+    method: str
+    method_type: str
+    display_name: str
+    description: Optional[str] = None
+    is_enabled: bool
+    sort_order: int
+    icon_name: Optional[str] = None
+    config_data: Optional[dict] = None
+    created_at: datetime
+    updated_at: datetime
 
 class SettingsProfileUpdate(CamelModel):
     company_name: str

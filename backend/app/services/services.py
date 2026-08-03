@@ -7,7 +7,8 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from app.models.models import (
-    User, Event, Participant, Payment, Competition, AuditLog, VoteTransaction
+    User, Event, Participant, Payment, Competition, AuditLog, VoteTransaction,
+    PaymentMethodConfig, TestPayment
 )
 from app.enums.enums import (
     UserRole, ContestantStatus, PaymentStatus,
@@ -16,15 +17,18 @@ from app.enums.enums import (
 from app.repositories.repositories import (
     UserRepository, EventRepository, ParticipantRepository,
     PaymentRepository, ActivityRepository,
-    SettingsRepository, VoteTransactionRepository, CompetitionRepository
+    SettingsRepository, VoteTransactionRepository, CompetitionRepository,
+    PaymentMethodConfigRepository, TestPaymentRepository
 )
-from app.core.security import hash_password, verify_password, create_access_token
+from app.core.security import hash_password, verify_password, create_access_token, create_refresh_token
+from app.exceptions.exceptions import ValidationException, NotFoundException, PaymentException
 from app.schemas.schemas import (
     UserRegister, UserLogin, AuthResult, UserResponse,
     EventCreate, EventUpdate, ParticipantCreate, PaymentCreate, SettingsProfileUpdate,
     ResetPasswordRequest, AdminInvitationRequest, AdminInvitationResponse,
     InvalidateAdminRequest, CompetitionCreate, CompetitionUpdate,
-    VoterCheckResponse, VoterDetailsUpdate, PaymentStatusCheckResponse
+    VoterCheckResponse, VoterDetailsUpdate, PaymentStatusCheckResponse,
+    PaymentMethodConfigCreate, PaymentMethodConfigUpdate
 )
 from app.audit.audit import AuditService
 from app.services.fraud import FraudDetectionService
@@ -34,6 +38,7 @@ from app.exceptions.exceptions import (
     VotingException, ValidationException, NotFoundException, AuthenticationException, PaymentException
 )
 from app.utils.email import email_service
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -79,8 +84,16 @@ class AuthService:
         )
 
         token = create_access_token(new_user.id)
+        refresh_token = create_refresh_token(new_user.id)
+        
+        # Store refresh token in database
+        new_user.refresh_token = refresh_token
+        new_user.refresh_token_expires = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+        self.user_repo.update()
+        
         return AuthResult(
             token=token,
+            refresh_token=refresh_token,
             user=UserResponse(
                 id=str(new_user.id),
                 name=str(new_user.name),
@@ -158,8 +171,16 @@ class AuthService:
         )
 
         token = create_access_token(user.id)
+        refresh_token = create_refresh_token(user.id)
+        
+        # Store refresh token in database
+        user.refresh_token = refresh_token
+        user.refresh_token_expires = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+        self.user_repo.update()
+        
         return AuthResult(
             token=token,
+            refresh_token=refresh_token,
             user=UserResponse(
                 id=user.id,
                 name=user.name,
@@ -170,6 +191,13 @@ class AuthService:
         )
 
     def logout_admin(self, user_id: str, ip_address: Optional[str] = None) -> None:
+        # Clear refresh token from database
+        user = self.user_repo.get_by_id(user_id)
+        if user:
+            user.refresh_token = None
+            user.refresh_token_expires = None
+            self.user_repo.update()
+        
         AuditService.log_action(
             db=self.db,
             action="Logout",
@@ -314,8 +342,16 @@ class AuthService:
         )
 
         token_jwt = create_access_token(user.id)
+        refresh_token_jwt = create_refresh_token(user.id)
+        
+        # Store refresh token in database
+        user.refresh_token = refresh_token_jwt
+        user.refresh_token_expires = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+        self.user_repo.update()
+        
         return AuthResult(
             token=token_jwt,
+            refresh_token=refresh_token_jwt,
             user=UserResponse(
                 id=user.id,
                 name=user.name,
@@ -405,9 +441,16 @@ class AuthService:
         )
 
         jwt = create_access_token(user.id)
+        refresh_token_jwt = create_refresh_token(user.id)
+        
+        # Store refresh token in database
+        user.refresh_token = refresh_token_jwt
+        user.refresh_token_expires = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+        self.user_repo.update()
 
         return AuthResult(
             token=jwt,
+            refresh_token=refresh_token_jwt,
             user=UserResponse(
                 id=user.id,
                 name=user.name,
@@ -637,6 +680,10 @@ class EventService:
             user_id=self.user_id,
             details=f"Created event: {saved.name} ({saved.id})"
         )
+        
+        # Invalidate cache after event creation
+        self._invalidate_event_cache_async()
+        
         return saved
 
     def update_event(self, event_id: str, event_in: EventUpdate) -> Event:
@@ -657,6 +704,10 @@ class EventService:
             user_id=self.user_id,
             details=f"Updated event: {event.name} ({event.id})"
         )
+        
+        # Invalidate cache after event update
+        self._invalidate_event_cache_async()
+        
         return event
 
     def delete_event(self, event_id: str) -> None:
@@ -672,6 +723,24 @@ class EventService:
             user_id=self.user_id,
             details=f"Soft deleted event: {event.name} ({event.id})"
         )
+        
+        # Invalidate cache after event deletion
+        self._invalidate_event_cache_async()
+
+    def _invalidate_event_cache_async(self):
+        """Async cache invalidation helper for events."""
+        import asyncio
+        from app.core.cache import get_cache_service
+        
+        async def _invalidate():
+            try:
+                cache_service = get_cache_service()
+                await cache_service.invalidate_events()
+            except Exception as e:
+                logger.error(f"Failed to invalidate events cache: {e}")
+        
+        # Fire and forget - don't block the main operation
+        asyncio.create_task(_invalidate())
 
 
 # ---------------------------------------------------------------------------
@@ -694,6 +763,49 @@ class ParticipantService:
         offset: int = 0, limit: int = 100
     ) -> Tuple[List[Participant], int]:
         return self.part_repo.search_and_filter(search, status, platform, competition_id, offset, limit)
+
+    async def list_public_participants_cached(
+        self, search: Optional[str] = None, status: Optional[ContestantStatus] = None,
+        platform: Optional[PlatformEnum] = None, competition_id: Optional[str] = None,
+        offset: int = 0, limit: int = 100
+    ) -> Tuple[List[Participant], int]:
+        """
+        Returns public participants with Redis caching.
+        Cache key includes search parameters for proper invalidation.
+        """
+        from app.core.cache import get_cache_service, get_cache_key, CACHE_TTL, CACHE_PREFIXES
+        
+        # Skip caching for searches or custom parameters (too many combinations)
+        if search or platform or status or offset != 0 or limit != 100:
+            return self.list_participants(search, status, platform, competition_id, offset, limit)
+        
+        try:
+            cache_service = get_cache_service()
+            cache_key = get_cache_key(
+                CACHE_PREFIXES['public_participants'],
+                f"comp:{competition_id}" if competition_id else "global"
+            )
+            
+            # Try to get from cache
+            cached_data = await cache_service.get(cache_key)
+            if cached_data is not None:
+                logger.info(f"Cache hit for public participants: {cache_key}")
+                # Return the cached data directly (endpoint will handle serialization)
+                return cached_data['items'], cached_data['total']
+            
+            # Cache miss - fetch from database
+            items, total = self.list_participants(search, status, platform, competition_id, offset, limit)
+            
+            # Store in cache (store as objects - endpoint will serialize)
+            await cache_service.set(cache_key, {'items': items, 'total': total}, CACHE_TTL['public_participants'])
+            logger.info(f"Cache miss and set for public participants: {cache_key}")
+            
+            return items, total
+            
+        except Exception as e:
+            logger.error(f"Cache error for public participants, falling back to DB: {e}")
+            # Fallback to database query on cache failure
+            return self.list_participants(search, status, platform, competition_id, offset, limit)
 
     def get_participant(self, part_id: str) -> Optional[Participant]:
         part = self.part_repo.get_by_id(part_id)
@@ -719,6 +831,10 @@ class ParticipantService:
             user_id=self.user_id,
             details=f"Created contestant: {saved.name} ({saved.id})"
         )
+        
+        # Invalidate cache after participant creation
+        self._invalidate_participant_cache_async(saved.id, saved.competition_id)
+        
         return saved
 
     def update_participant_status(self, part_id: str, status: ContestantStatus) -> Participant:
@@ -736,6 +852,10 @@ class ParticipantService:
             user_id=self.user_id,
             details=f"Contestant status updated from {old_status.value} to {status.value} for {part.name} ({part.id})"
         )
+        
+        # Invalidate cache after status change
+        self._invalidate_participant_cache_async(part_id, part.competition_id)
+        
         return part
 
     def delete_participant(self, part_id: str) -> None:
@@ -750,6 +870,27 @@ class ParticipantService:
             user_id=self.user_id,
             details=f"Soft deleted contestant: {part.name} ({part.id})"
         )
+        
+        # Invalidate cache after deletion
+        self._invalidate_participant_cache_async(part_id, part.competition_id)
+
+    def _invalidate_participant_cache_async(self, participant_id: str, competition_id: Optional[str] = None):
+        """Async cache invalidation helper that doesn't block the main operation."""
+        import asyncio
+        from app.core.cache import get_cache_service
+        
+        async def _invalidate():
+            try:
+                cache_service = get_cache_service()
+                await cache_service.invalidate_participant(participant_id)
+                await cache_service.invalidate_participants()  # Also invalidate public participants
+                if competition_id:
+                    await cache_service.invalidate_leaderboard(competition_id)
+            except Exception as e:
+                logger.error(f"Failed to invalidate cache for participant {participant_id}: {e}")
+        
+        # Fire and forget - don't block the main operation
+        asyncio.create_task(_invalidate())
 
     def get_leaderboard(self, competition_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
@@ -775,6 +916,37 @@ class ParticipantService:
             }
             for p in participants
         ]
+
+    async def get_leaderboard_cached(self, competition_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Returns the public leaderboard with Redis caching.
+        Does NOT expose voter phone numbers or emails.
+        """
+        from app.core.cache import get_cache_service, get_cache_key, CACHE_TTL, CACHE_PREFIXES
+        
+        try:
+            cache_service = get_cache_service()
+            cache_key = get_cache_key(CACHE_PREFIXES['leaderboard'], f"comp:{competition_id}" if competition_id else "global")
+            
+            # Try to get from cache
+            cached_data = await cache_service.get(cache_key)
+            if cached_data is not None:
+                logger.info(f"Cache hit for leaderboard: {cache_key}")
+                return cached_data
+            
+            # Cache miss - fetch from database
+            leaderboard_data = self.get_leaderboard(competition_id)
+            
+            # Store in cache
+            await cache_service.set(cache_key, leaderboard_data, CACHE_TTL['leaderboard'])
+            logger.info(f"Cache miss and set for leaderboard: {cache_key}")
+            
+            return leaderboard_data
+            
+        except Exception as e:
+            logger.error(f"Cache error for leaderboard, falling back to DB: {e}")
+            # Fallback to database query on cache failure
+            return self.get_leaderboard(competition_id)
 
     def get_public_leaderboard(self, competition_id: str):
         return self.part_repo.get_public_leaderboard(competition_id)
@@ -802,12 +974,14 @@ class PaymentService:
         self.db = db
         self.user_id = user_id
         self.payment_repo = PaymentRepository(db)
+        self.test_payment_repo = TestPaymentRepository(db)
         self.part_repo = ParticipantRepository(db)
         self.vote_repo = VoteTransactionRepository(db)
         self.comp_repo = CompetitionRepository(db)
         self.paynow_client = PaynowClient()
         self.fraud_service = FraudDetectionService(db)
         self.idempotency_service = IdempotencyService(db)
+        self.test_mode = settings.TEST_PAYMENT_MODE  # Use specific test payment mode setting
 
     def check_voter_duplicate(
         self, phone: str, competition_id: Optional[str] = None
@@ -858,16 +1032,18 @@ class PaymentService:
                 "Too many payment attempts. Please wait a few minutes before trying again."
             )
 
-    def initiate_payment(self, payment_in: PaymentCreate) -> Dict[str, Any]:
+    def initiate_payment(self, payment_in: PaymentCreate, idempotency_key: Optional[str] = None) -> Dict[str, Any]:
         """
         INITIATE PAYMENT (Enhanced):
         1. Validates contestant exists
         2. Checks voter duplication (phone + competition)
         3. If duplicate, requires acknowledge_duplicate=True
         4. Rate limits by phone
-        5. Uses official Paynow SDK to create payment
-        6. Saves poll_url to DB (MANDATORY per Paynow docs)
-        7. Returns redirect URL (web) or instructions (mobile)
+        5. Checks idempotency to prevent duplicate payments
+        6. In TEST MODE: Creates test payment without calling Paynow
+        7. In PRODUCTION: Uses official Paynow SDK to create payment
+        8. Saves poll_url to DB (MANDATORY per Paynow docs)
+        9. Returns redirect URL (web) or instructions (mobile)
         """
         # 1. Validate contestant
         part = self.part_repo.get_by_id(payment_in.contestant_id)
@@ -886,6 +1062,13 @@ class PaymentService:
                     raise PaymentException("Voting has not yet opened for this competition.")
                 if end and now > end:
                     raise PaymentException("Voting has closed for this competition.")
+
+        # 1c. Validate payment method is enabled
+        from app.repositories.repositories import PaymentMethodConfigRepository
+        payment_method_repo = PaymentMethodConfigRepository(self.db)
+        payment_method_config = payment_method_repo.get_by_method(payment_in.payment_method.lower())
+        if not payment_method_config or not payment_method_config.is_enabled:
+            raise PaymentException(f"Payment method '{payment_in.payment_method}' is not available or has been disabled.")
 
         # 2. Duplicate voter check
         voter_check = self.check_voter_duplicate(
@@ -906,43 +1089,132 @@ class PaymentService:
         # 3. Rate limiting
         self._rate_limit_check(payment_in.voter_phone)
 
+        # 3b. Idempotency dedupe: if client supplied a key and we already
+        # have a payment with that key, return existing details instead
+        if idempotency_key:
+            existing = self.payment_repo.get_by_idempotency_key(idempotency_key)
+            if existing:
+                logger.info(f"Idempotency: returning existing payment for key {idempotency_key}")
+                return {
+                    "warning": None,
+                    "has_voted": False,
+                    "reference": existing.reference,
+                    "redirectUrl": existing.paynow_redirect_url,
+                    "instructions": None,
+                    "pollUrl": existing.poll_url,
+                }
+
         # 4. Generate reference
         reference = f"VOTE-{uuid.uuid4().hex[:8].upper()}"
 
-        # 5. Resolve competition_id
+        # 5. Resolve competition_id and vote price with fallback chain
         comp_id = payment_in.competition_id
-        if not comp_id:
-            active_comp = self.comp_repo.get_active_competition()
-            if active_comp:
-                comp_id = active_comp.id
+        vote_price = None
+        
+        # Priority: Event vote_price → Competition vote_price → Global minimum
+        if hasattr(part, 'event_id') and part.event_id:
+            from app.repositories.repositories import EventRepository
+            event_repo = EventRepository(self.db)
+            event = event_repo.get_by_id(part.event_id)
+            if event and event.vote_price:
+                vote_price = event.vote_price
+        
+        if not vote_price and part.competition_id:
+            comp = self.comp_repo.get_by_id(part.competition_id)
+            if comp and comp.vote_price:
+                vote_price = comp.vote_price
+        
+        if not vote_price:
+            vote_price = settings.MIN_PAYMENT_AMOUNT
+        
+        # Ensure the amount meets the minimum requirement
+        if vote_price < settings.MIN_PAYMENT_AMOUNT:
+            vote_price = settings.MIN_PAYMENT_AMOUNT
+            logger.info(f"Adjusted vote_price to minimum ${vote_price} for contestant {part.id}")
 
-        # 6. BUG 5 FIX: Determine the CORRECT amount SERVER-SIDE.
-        # The client-supplied amount is IGNORED. We read vote_price from the
-        # competition (or event) and use that. This prevents voters from
-        # setting amount=0.01 and getting votes for pennies.
-        server_amount = None
-        if comp_id:
-            comp = self.comp_repo.get_by_id(comp_id)
-            if comp:
-                server_amount = comp.vote_price
-        if server_amount is None and part.competition_id:
-            # Fallback: look up via the participant's competition
-            fallback_comp = self.comp_repo.get_by_id(part.competition_id)
-            if fallback_comp:
-                server_amount = fallback_comp.vote_price
-        if server_amount is None:
-            # Last resort: use a hard-coded minimum of 1.00
-            server_amount = 1
-            logger.warning(f"No competition vote_price found for contestant {part.id}, using fallback ${server_amount}")
+        # 6. TEST MODE: Create test payment without Paynow
+        if self.test_mode:
+            return self._initiate_test_payment(
+                payment_in, part, reference, vote_price, comp_id, idempotency_key
+            )
 
+        # 7. PRODUCTION MODE: Continue with real Paynow flow
+        return self._initiate_real_payment(
+            payment_in, part, reference, vote_price, comp_id, idempotency_key
+        )
+
+    def _initiate_test_payment(
+        self, payment_in: PaymentCreate, part: Participant, 
+        reference: str, vote_price: float, comp_id: Optional[str],
+        idempotency_key: Optional[str]
+    ) -> Dict[str, Any]:
+        """
+        Create a test payment without calling Paynow SDK.
+        Used in development mode for testing payment flows without real money.
+        """
+        test_redirect_url = f"{settings.FRONTEND_URL}/payments/test/{reference}"
+        
+        test_payment = TestPayment(
+            reference=reference,
+            contestant_id=part.id,
+            amount=vote_price,
+            payment_method=payment_in.payment_method,
+            status="created",
+            voter_phone=payment_in.voter_phone,
+            voter_email=payment_in.voter_email,
+            source_platform=payment_in.source_platform,
+            competition_id=comp_id,
+            test_redirect_url=test_redirect_url,
+            is_test_payment=True,
+            auto_complete=True,  # Auto-complete test payments after delay
+            test_completion_delay=5,  # Complete after 5 seconds
+            test_response_data={
+                "test_mode": True,
+                "simulated": True,
+                "vote_price": str(vote_price)
+            }
+        )
+        
+        self.test_payment_repo.create(test_payment)
+        
+        logger.info(f"Test payment created: {reference} for contestant {part.name} (${vote_price})")
+        
+        # Log test payment initiation
+        AuditService.log_action(
+            db=self.db,
+            action="Test Payment Created",
+            user_id=self.user_id,
+            details=f"TEST MODE: Payment {reference} for contestant {part.name} (${vote_price})"
+        )
+        
+        return {
+            "warning": None,
+            "has_voted": False,
+            "reference": reference,
+            "redirectUrl": test_redirect_url,
+            "instructions": None,
+            "pollUrl": None,
+            "amount": str(vote_price),
+            "test_mode": True
+        }
+
+    def _initiate_real_payment(
+        self, payment_in: PaymentCreate, part: Participant,
+        reference: str, vote_price: float, comp_id: Optional[str],
+        idempotency_key: Optional[str]
+    ) -> Dict[str, Any]:
+        """
+        Create a real payment using Paynow SDK.
+        Used in production mode for actual payment processing.
+        """
         # Determine payment type (web vs mobile)
         is_mobile = payment_in.payment_method.lower() in ("ecocash", "onemoney")
 
-        # 7. Create local payment record with SERVER-DETERMINED amount
+        # Create local payment record with SERVER-DETERMINED amount
         pending_payment = Payment(
             reference=reference,
             contestant_id=part.id,
-            amount=server_amount,
+            amount=vote_price,
             payment_method=payment_in.payment_method,
             status=PaymentStatus.CREATED,
             voter_phone=payment_in.voter_phone,
@@ -951,9 +1223,12 @@ class PaymentService:
             competition_id=comp_id,
             duplicate_vote_acknowledged=payment_in.acknowledge_duplicate,
         )
+        # Persist optional idempotency key to detect client retries
+        if idempotency_key:
+            pending_payment.idempotency_key = idempotency_key
         # Don't commit yet — we'll commit after Paynow confirms creation
 
-        # 8. Call Paynow SDK with SERVER-DETERMINED amount
+        # Call Paynow SDK with SERVER-DETERMINED amount
         item_name = f"Vote for {part.name}"
         voter_email = payment_in.voter_email or "voter@platform.com"
 
@@ -963,7 +1238,7 @@ class PaymentService:
                     reference=reference,
                     email=voter_email,
                     item_name=item_name,
-                    amount=server_amount,
+                    amount=vote_price,
                     phone=payment_in.voter_phone,
                     method=payment_in.payment_method.lower(),
                 )
@@ -972,7 +1247,7 @@ class PaymentService:
                     reference=reference,
                     email=voter_email,
                     item_name=item_name,
-                    amount=server_amount,
+                    amount=vote_price,
                 )
         except ImportError:
             # H4 FIX: Paynow SDK not installed — FAIL loudly, don't fake success.
@@ -994,13 +1269,14 @@ class PaymentService:
             )
             raise PaymentException(f"Payment could not be initiated: {error_msg}")
 
-        # 9. Save poll_url and redirect URL to payment record
+        # Save poll_url and redirect URL to payment record
         pending_payment.poll_url = paynow_response.get("poll_url")
         pending_payment.paynow_redirect_url = paynow_response.get("redirect_url")
         pending_payment.status = PaymentStatus.PENDING
 
         self.payment_repo.create(pending_payment)
 
+        # Log payment initiation
         AuditService.log_action(
             db=self.db,
             action="Payment Created",
@@ -1008,6 +1284,7 @@ class PaymentService:
                     f"via {payment_in.payment_method}, src={payment_in.source_platform or 'direct'}"
         )
 
+        # Return response
         return {
             "warning": None,
             "has_voted": False,
@@ -1015,6 +1292,7 @@ class PaymentService:
             "redirectUrl": paynow_response.get("redirect_url"),
             "instructions": paynow_response.get("instructions"),
             "pollUrl": paynow_response.get("poll_url"),
+            "amount": str(vote_price)
         }
 
     def process_paynow_callback(self, callback_data: Dict[str, Any]) -> None:
@@ -1143,6 +1421,9 @@ class PaymentService:
                 # COMMIT — atomic
                 self.db.commit()
                 logger.info(f"Transaction committed successfully. reference: {reference}.")
+                
+                # Invalidate cache after vote crediting
+                self._invalidate_vote_cache_async(payment.contestant_id, payment.competition_id)
             else:
                 payment.status = PaymentStatus.FAILED
 
@@ -1157,6 +1438,24 @@ class PaymentService:
             self.db.rollback()
             logger.error(f"Transaction rolled back during callback process: {str(e)}")
             raise
+
+    def _invalidate_vote_cache_async(self, contestant_id: str, competition_id: Optional[str] = None):
+        """Async cache invalidation helper for vote updates."""
+        import asyncio
+        from app.core.cache import get_cache_service
+        
+        async def _invalidate():
+            try:
+                cache_service = get_cache_service()
+                await cache_service.invalidate_participant(contestant_id)
+                await cache_service.invalidate_participants()  # Also invalidate public participants
+                if competition_id:
+                    await cache_service.invalidate_leaderboard(competition_id)
+            except Exception as e:
+                logger.error(f"Failed to invalidate cache for contestant {contestant_id}: {e}")
+        
+        # Fire and forget - don't block the main operation
+        asyncio.create_task(_invalidate())
 
     def check_payment_status(self, reference: str) -> PaymentStatusCheckResponse:
         """
@@ -1346,3 +1645,126 @@ class SettingsService:
             details=f"Platform settings updated for company: {saved.company_name}"
         )
         return saved
+
+
+# ---------------------------------------------------------------------------
+# PaymentMethodConfigService
+# ---------------------------------------------------------------------------
+
+class PaymentMethodConfigService:
+    """
+    Service for managing payment method configurations.
+    Allows admins to enable/disable payment methods for voting.
+    """
+    def __init__(self, db: Session, user_id: Optional[str] = None) -> None:
+        self.db = db
+        self.user_id = user_id
+        self.payment_method_repo = PaymentMethodConfigRepository(db)
+
+    def list_payment_methods(self) -> List[PaymentMethodConfig]:
+        """Get all payment methods ordered by sort_order."""
+        return self.payment_method_repo.get_all_ordered()
+
+    def list_enabled_payment_methods(self) -> List[PaymentMethodConfig]:
+        """Get only enabled payment methods for public display."""
+        return self.payment_method_repo.get_enabled_methods()
+
+    def get_payment_method(self, method_id: str) -> Optional[PaymentMethodConfig]:
+        """Get payment method by ID."""
+        return self.payment_method_repo.get_by_id(method_id)
+
+    def create_payment_method(self, method_in: PaymentMethodConfigCreate) -> PaymentMethodConfig:
+        """Create a new payment method configuration."""
+        from app.models.models import PaymentMethodConfig
+        
+        # Check if method already exists
+        existing = self.payment_method_repo.get_by_method(method_in.method)
+        if existing:
+            raise ValidationException(f"Payment method '{method_in.method}' already exists")
+        
+        new_method = PaymentMethodConfig(
+            method=method_in.method,
+            method_type=method_in.method_type,
+            display_name=method_in.display_name,
+            description=method_in.description,
+            is_enabled=method_in.is_enabled,
+            sort_order=method_in.sort_order,
+            icon_name=method_in.icon_name,
+            config_data=method_in.config_data
+        )
+        
+        saved = self.payment_method_repo.create(new_method)
+        
+        AuditService.log_action(
+            db=self.db,
+            action="Payment Method Created",
+            user_id=self.user_id,
+            details=f"Created payment method: {saved.display_name} ({saved.method})"
+        )
+        
+        return saved
+
+    def update_payment_method(self, method_id: str, method_in: PaymentMethodConfigUpdate) -> PaymentMethodConfig:
+        """Update an existing payment method configuration."""
+        method = self.payment_method_repo.get_by_id(method_id)
+        if not method:
+            raise NotFoundException("Payment method not found")
+        
+        # Update only provided fields
+        if method_in.display_name is not None:
+            method.display_name = method_in.display_name
+        if method_in.description is not None:
+            method.description = method_in.description
+        if method_in.is_enabled is not None:
+            method.is_enabled = method_in.is_enabled
+        if method_in.sort_order is not None:
+            method.sort_order = method_in.sort_order
+        if method_in.icon_name is not None:
+            method.icon_name = method_in.icon_name
+        if method_in.config_data is not None:
+            method.config_data = method_in.config_data
+        
+        self.payment_method_repo.update()
+        
+        AuditService.log_action(
+            db=self.db,
+            action="Payment Method Updated",
+            user_id=self.user_id,
+            details=f"Updated payment method: {method.display_name} ({method.method})"
+        )
+        
+        return method
+
+    def delete_payment_method(self, method_id: str) -> None:
+        """Delete a payment method configuration."""
+        method = self.payment_method_repo.get_by_id(method_id)
+        if not method:
+            raise NotFoundException("Payment method not found")
+        
+        self.payment_method_repo.delete(method)
+        
+        AuditService.log_action(
+            db=self.db,
+            action="Payment Method Deleted",
+            user_id=self.user_id,
+            details=f"Deleted payment method: {method.display_name} ({method.method})"
+        )
+
+    def toggle_payment_method(self, method_id: str, enabled: bool) -> PaymentMethodConfig:
+        """Quick toggle for enabling/disabling a payment method."""
+        method = self.payment_method_repo.get_by_id(method_id)
+        if not method:
+            raise NotFoundException("Payment method not found")
+        
+        method.is_enabled = enabled
+        self.payment_method_repo.update()
+        
+        action = "Payment Method Enabled" if enabled else "Payment Method Disabled"
+        AuditService.log_action(
+            db=self.db,
+            action=action,
+            user_id=self.user_id,
+            details=f"{'Enabled' if enabled else 'Disabled'} payment method: {method.display_name} ({method.method})"
+        )
+        
+        return method

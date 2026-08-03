@@ -1,10 +1,11 @@
 import math
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, List, Optional, Tuple, Type, TypeVar, Generic
 from sqlalchemy.orm import Session,Query
 from app.models.models import (
     User, Event, Participant, Payment, Activity, 
-    SocialPlatformSync, Setting, VoteTransaction, AuditLog, Competition
+    SocialPlatformSync, Setting, VoteTransaction, AuditLog, Competition,
+    PaymentMethodConfig, TestPayment
 )
 from app.enums.enums import (
     EventStatus, ContestantStatus, SocialPlatform as PlatformEnum, 
@@ -99,7 +100,7 @@ class UserRepository(BaseRepository[User]):
     def get_all_active_admins(self) -> List[User]:
         """Get all active admin users for super admin management."""
         query = self.db.query(User).filter(
-            User.role.in_([UserRole.ADMIN, UserRole.MODERATOR]),
+            User.role.in_([UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.MODERATOR]),
             User.is_active.is_(True)
         )
         if hasattr(User, "deleted_at"):
@@ -218,6 +219,11 @@ class PaymentRepository(BaseRepository[Payment]):
     def get_by_reference(self, reference: str) -> Optional[Payment]:
         return self.db.query(Payment).filter(Payment.reference == reference).first()
 
+    def get_by_idempotency_key(self, key: str) -> Optional[Payment]:
+        if not key:
+            return None
+        return self.db.query(Payment).filter(Payment.idempotency_key == key).first()
+
     def get_all_ordered_by_date(
         self, offset: int = 0, limit: int = DEFAULT_MAX_PAGE_SIZE
     ) -> Tuple[List[Payment], int]:
@@ -307,6 +313,36 @@ class SettingsRepository:
         return settings_row
 
 
+class PaymentMethodConfigRepository(BaseRepository[PaymentMethodConfig]):
+    """Repository for payment method configuration management."""
+    
+    def __init__(self, db: Session):
+        super().__init__(PaymentMethodConfig, db)
+    
+    def get_enabled_methods(self) -> List[PaymentMethodConfig]:
+        """Get all enabled payment methods ordered by sort_order."""
+        return self.db.query(PaymentMethodConfig)\
+            .filter(PaymentMethodConfig.is_enabled == True)\
+            .order_by(PaymentMethodConfig.sort_order)\
+            .all()
+    
+    def get_by_method(self, method: str) -> Optional[PaymentMethodConfig]:
+        """Get payment method config by method identifier."""
+        return self.db.query(PaymentMethodConfig)\
+            .filter(PaymentMethodConfig.method == method)\
+            .first()
+    
+    def get_all_ordered(self) -> List[PaymentMethodConfig]:
+        """Get all payment methods ordered by sort_order."""
+        return self.db.query(PaymentMethodConfig)\
+            .order_by(PaymentMethodConfig.sort_order)\
+            .all()
+    
+    def update(self) -> None:
+        """Override update to handle timestamp auto-update."""
+        self.db.commit()
+
+
 # --- Pagination helper ---
 
 def paginate_response(
@@ -339,3 +375,53 @@ def paginate_response(
             "hasPrev": page > 1,
         }
     }
+
+
+class TestPaymentRepository(BaseRepository[TestPayment]):
+    """Repository for test payment operations during development."""
+    
+    def __init__(self, db: Session):
+        super().__init__(TestPayment, db)
+    
+    def get_by_reference(self, reference: str) -> Optional[TestPayment]:
+        return self.db.query(TestPayment).filter(TestPayment.reference == reference).first()
+    
+    def get_by_voter_phone(self, phone: str, limit: int = 10) -> List[TestPayment]:
+        return self.db.query(TestPayment).filter(
+            TestPayment.voter_phone == phone
+        ).order_by(TestPayment.created_at.desc()).limit(limit).all()
+    
+    def get_recent_pending(self, minutes: int = 10) -> List[TestPayment]:
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+        return self.db.query(TestPayment).filter(
+            TestPayment.status == "created",
+            TestPayment.created_at >= cutoff
+        ).all()
+    
+    def update_status(self, test_payment: TestPayment, status: str) -> TestPayment:
+        test_payment.status = status
+        test_payment.updated_at = datetime.now(timezone.utc)
+        self.db.commit()
+        self.db.refresh(test_payment)
+        return test_payment
+    
+    def create(self, test_payment: TestPayment) -> TestPayment:
+        self.db.add(test_payment)
+        self.db.commit()
+        self.db.refresh(test_payment)
+        return test_payment
+    
+    def delete(self, test_payment: TestPayment) -> bool:
+        try:
+            self.db.delete(test_payment)
+            self.db.commit()
+            return True
+        except Exception:
+            self.db.rollback()
+            return False
+    
+    def get_all_test_payments(self, offset: int = 0, limit: int = 100) -> List[TestPayment]:
+        return self.db.query(TestPayment).order_by(TestPayment.created_at.desc()).offset(offset).limit(limit).all()
+    
+    def count_all(self) -> int:
+        return self.db.query(TestPayment).count()

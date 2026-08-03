@@ -1,5 +1,5 @@
-import { LeaderboardPage } from '@/components/pages/leaderboard-page'
+import LeaderboardView from '@/components/views/leaderboard-view'
 
-export default function LeaderboardRoute() {
-  return <LeaderboardPage />
+export default function Page() {
+  return <LeaderboardView />
 }

@@ -1,5 +1,5 @@
-import { LandingPage } from '@/components/pages/landing-page'
+import LandingView from '@/components/views/landing-view'
 
-export default function LandingRoute() {
-  return <LandingPage />
+export default function Home() {
+  return <LandingView />
 }

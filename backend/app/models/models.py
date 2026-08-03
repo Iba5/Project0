@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional
 
-from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, Enum, Text, Numeric
+from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, Enum, Text, Numeric, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -48,6 +48,10 @@ class User(Base):
     failed_login_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Refresh token fields for JWT lifecycle management
+    refresh_token: Mapped[Optional[str]] = mapped_column(String, nullable=True, unique=True, index=True)
+    refresh_token_expires: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
     audit_logs: Mapped[List["AuditLog"]] = relationship("AuditLog", back_populates="user")
 
 
@@ -59,11 +63,11 @@ class Competition(Base):
     __tablename__ = "competitions"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    name: Mapped[str] = mapped_column(String, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False, index=True)  # Index for search
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    status: Mapped[CompetitionStatus] = mapped_column(Enum(CompetitionStatus), default=CompetitionStatus.DRAFT, nullable=False)
-    start_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    end_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[CompetitionStatus] = mapped_column(Enum(CompetitionStatus), default=CompetitionStatus.DRAFT, nullable=False, index=True)  # Index for status filtering
+    start_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)  # Index for date queries
+    end_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)  # Index for date queries
     # C5 FIX: Numeric for monetary values — Float causes precision corruption
     # (e.g. 0.1 + 0.2 = 0.30000000000000004)
     vote_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("1.00"), nullable=False)
@@ -71,7 +75,7 @@ class Competition(Base):
     currency: Mapped[str] = mapped_column(String, default="USD", nullable=False)
     public_leaderboard: Mapped[bool] = mapped_column(Boolean, default=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=False, index=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)  # Index for date queries
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     events: Mapped[List["Event"]] = relationship("Event", back_populates="competition")
@@ -86,13 +90,13 @@ class Event(Base):
     __tablename__ = "events"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    name: Mapped[str] = mapped_column(String, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False, index=True)  # Index for search
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     banner: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    start_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    end_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    status: Mapped[EventStatus] = mapped_column(Enum(EventStatus), default=EventStatus.DRAFT, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    start_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)  # Index for date queries
+    end_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)  # Index for date queries
+    status: Mapped[EventStatus] = mapped_column(Enum(EventStatus), default=EventStatus.DRAFT, nullable=False, index=True)  # Index for status filtering
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)  # Index for date queries
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)  # Soft delete field
 
     # C5 FIX: Numeric for monetary values
@@ -121,13 +125,13 @@ class Participant(Base):
     __tablename__ = "participants"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    name: Mapped[str] = mapped_column(String, nullable=False)
-    category: Mapped[str] = mapped_column(String, nullable=False)
-    platform: Mapped[SocialPlatform] = mapped_column(Enum(SocialPlatform), nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False, index=True)  # Index for search
+    category: Mapped[str] = mapped_column(String, nullable=False, index=True)  # Index for filtering
+    platform: Mapped[SocialPlatform] = mapped_column(Enum(SocialPlatform), nullable=False, index=True)  # Index for platform filtering
     video_url: Mapped[str] = mapped_column(String, nullable=False)
-    status: Mapped[ContestantStatus] = mapped_column(Enum(ContestantStatus), default=ContestantStatus.DRAFT, nullable=False)
-    votes: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    status: Mapped[ContestantStatus] = mapped_column(Enum(ContestantStatus), default=ContestantStatus.DRAFT, nullable=False, index=True)  # Index for status filtering
+    votes: Mapped[int] = mapped_column(Integer, default=0, index=True)  # Index for leaderboard sorting
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)  # Index for date queries
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)  # Soft delete field
 
     # Foreign key to Competition (nullable for backward compatibility)
@@ -174,6 +178,9 @@ class Payment(Base):
     # Warning acknowledgement (for duplicate voters)
     duplicate_vote_acknowledged: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # Idempotency: optional client-supplied idempotency key to detect retries
+    idempotency_key: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
+
     contestant: Mapped[Optional["Participant"]] = relationship("Participant", back_populates="payments")
     vote_transaction: Mapped[Optional["VoteTransaction"]] = relationship(
         "VoteTransaction", uselist=False, back_populates="payment"
@@ -208,13 +215,33 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("users.id"), nullable=True)
-    action: Mapped[str] = mapped_column(String, nullable=False)
+    user_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("users.id"), nullable=True, index=True)  # Index for user queries
+    action: Mapped[str] = mapped_column(String, nullable=False, index=True)  # Index for action filtering
     ip_address: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     details: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)  # Index for time-based queries
 
     user: Mapped[Optional["User"]] = relationship("User", back_populates="audit_logs")
+
+
+class PaymentMethodConfig(Base):
+    """
+    Payment method configuration managed by admins.
+    Allows enabling/disabling specific payment methods for voting.
+    """
+    __tablename__ = "payment_method_configs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    method: Mapped[str] = mapped_column(String, nullable=False, unique=True)  # e.g., "visa", "ecocash"
+    method_type: Mapped[str] = mapped_column(String, nullable=False)  # "web", "mobile", "offline"
+    display_name: Mapped[str] = mapped_column(String, nullable=False)  # "Visa", "EcoCash"
+    description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    icon_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # For UI display
+    config_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)  # Additional config
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
 class Activity(Base):
@@ -256,3 +283,31 @@ class Setting(Base):
     email_notifications: Mapped[bool] = mapped_column(Boolean, default=True)
     sms_notifications: Mapped[bool] = mapped_column(Boolean, default=False)
     marketing_notifications: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class TestPayment(Base):
+    """
+    Development-only test payment table for testing payment flows without real money.
+    This table should be dropped before production deployment.
+    """
+    __tablename__ = "test_payments"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    reference: Mapped[str] = mapped_column(String, unique=True, index=True, nullable=False)
+    contestant_id: Mapped[str] = mapped_column(String, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    payment_method: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, default="created", nullable=False)
+    voter_phone: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    voter_email: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    source_platform: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    competition_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    test_redirect_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    is_test_payment: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    
+    # Test-specific fields
+    test_response_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    auto_complete: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # Auto-complete test payments
+    test_completion_delay: Mapped[int] = mapped_column(Integer, default=5, nullable=False)  # Seconds before auto-completion

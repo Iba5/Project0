@@ -10,6 +10,16 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme={theme as ToasterProps["theme"]}
       className="toaster group"
+      // Phase 9 — cap concurrent visible toasts at 3 so milestone/vote
+      // bursts don't flood the corner. Older toasts are dismissed first.
+      // (In sonner v2 this prop is called `visibleToasts`; the old `limit`
+      // prop was removed.)
+      visibleToasts={3}
+      toastOptions={{
+        classNames: {
+          toast: 'toast-enter',
+        },
+      }}
       style={
         {
           "--normal-bg": "var(--popover)",

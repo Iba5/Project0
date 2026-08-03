@@ -1,10 +1,11 @@
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status, Query
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.security import create_access_token, create_refresh_token, decode_refresh_token
 from app.services.services import AuthService
 from app.schemas.schemas import (
     AuthResult,
@@ -20,6 +21,7 @@ from app.api.v1.dependencies import get_current_active_user, PermissionChecker
 from app.enums.enums import Permission
 from app.models.models import User
 from app.exceptions.exceptions import ValidationException, AuthenticationException
+from app.repositories.repositories import UserRepository
 router = APIRouter()
 
 
@@ -44,6 +46,7 @@ class CompleteSignupBody(BaseModel):
 )
 def register(
     request: Request,
+    response: Response,
     user_in: UserRegister,
     db: Session = Depends(get_db),
 ) -> AuthResult:
@@ -77,7 +80,69 @@ def register(
     auth_service = AuthService(db)
     # C3 FIX: Let VotingException subclasses (AuthenticationException=401, ValidationException=422)
     # propagate to the global handler instead of swallowing them as 400.
-    return auth_service.register_admin(user_in)
+    auth_result = auth_service.register_admin(user_in)
+    
+    # Set refresh token in httpOnly cookie
+    if auth_result.refresh_token:
+        response.set_cookie(
+            key="refresh_token",
+            value=auth_result.refresh_token,
+            httponly=True,
+            secure=settings.COOKIE_SECURE,
+            samesite="lax",
+            max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60  # Convert days to seconds
+        )
+    
+    return auth_result
+
+
+@router.post(
+    "/signup",
+    response_model=AuthResult,
+    status_code=status.HTTP_201_CREATED,
+    summary="Register a new Admin account (alias for /register)",
+)
+def signup(
+    request: Request,
+    response: Response,
+    user_in: UserRegister,
+    db: Session = Depends(get_db),
+) -> AuthResult:
+    return register(request, response, user_in, db)
+
+
+@router.get(
+    "/signup/status",
+    summary="Check if initial super admin setup is complete",
+)
+def signup_status(
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    from app.repositories.repositories import UserRepository
+    user_repo = UserRepository(db)
+    existing_admins = user_repo.get_all()
+    active_admins = [u for u in existing_admins if u.is_active]
+    return {
+        "superAdminExists": len(active_admins) > 0,
+        "has_admins": len(active_admins) > 0,
+    }
+
+
+@router.get(
+    "/me",
+    summary="Get currently authenticated user details",
+)
+def get_me(
+    current_user: User = Depends(get_current_active_user),
+) -> dict[str, Any]:
+    from app.schemas.schemas import UserResponse
+    user_resp = UserResponse(
+        id=current_user.id,
+        name=current_user.name,
+        email=current_user.email,
+        role=current_user.role,
+    )
+    return {"user": user_resp.model_dump(by_alias=True)}
 
 
 @router.post(
@@ -88,12 +153,26 @@ def register(
 )
 def login(
     request: Request,
+    response: Response,
     login_in: UserLogin,
     db: Session = Depends(get_db),
 ) -> AuthResult:
     auth_service = AuthService(db)
     client_ip = request.client.host if request.client else None
-    return auth_service.login_admin(login_in, ip_address=client_ip)
+    auth_result = auth_service.login_admin(login_in, ip_address=client_ip)
+    
+    # Set refresh token in httpOnly cookie
+    if auth_result.refresh_token:
+        response.set_cookie(
+            key="refresh_token",
+            value=auth_result.refresh_token,
+            httponly=True,
+            secure=settings.COOKIE_SECURE,
+            samesite="lax",
+            max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60  # Convert days to seconds
+        )
+    
+    return auth_result
 
 
 @router.post(
@@ -103,12 +182,22 @@ def login(
 )
 def logout(
     request: Request,
+    response: Response,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     auth_service = AuthService(db)
     client_ip = request.client.host if request.client else None
     auth_service.logout_admin(current_user.id, ip_address=client_ip)
+    
+    # Clear refresh token cookie
+    response.delete_cookie(
+        key="refresh_token",
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite="lax"
+    )
+    
     return {"success": True, "message": "Successfully logged out."}
 
 
@@ -164,15 +253,29 @@ def invite_admin(
 )
 def complete_signup(
     body: CompleteSignupBody,
+    response: Response,
     db: Session = Depends(get_db),
 ) -> AuthResult:
     auth_service = AuthService(db)
 
-    return auth_service.complete_admin_signup(
+    auth_result = auth_service.complete_admin_signup(
         body.token,
         body.name,
         body.password,
     )
+    
+    # Set refresh token in httpOnly cookie
+    if auth_result.refresh_token:
+        response.set_cookie(
+            key="refresh_token",
+            value=auth_result.refresh_token,
+            httponly=True,
+            secure=settings.COOKIE_SECURE,
+            samesite="lax",
+            max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60  # Convert days to seconds
+        )
+    
+    return auth_result
 
 
 @router.post(
@@ -223,3 +326,114 @@ def verify_invitation(
             if hasattr(invitation.role, "value")
             else invitation.role,
         }
+
+
+@router.post(
+    "/refresh",
+    response_model=AuthResult,
+    summary="Refresh access token using refresh token from cookie",
+    description="Issues a new access token using a valid refresh token from httpOnly cookie."
+)
+def refresh_token(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> AuthResult:
+    """
+    Refresh access token using refresh token from httpOnly cookie.
+    Implements token rotation by issuing a new refresh token.
+    """
+    refresh_token_cookie = request.cookies.get("refresh_token")
+    
+    if not refresh_token_cookie:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token not found in cookies"
+        )
+    
+    # Decode and validate refresh token
+    payload = decode_refresh_token(refresh_token_cookie)
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token"
+        )
+    
+    user_id = payload.get("sub")
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token payload"
+        )
+    
+    # Get user from database
+    user_repo = UserRepository(db)
+    user = user_repo.get_by_id(user_id)
+    
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found"
+        )
+    
+    # Verify the refresh token matches the one stored in database
+    if user.refresh_token != refresh_token_cookie:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token does not match stored token"
+        )
+    
+    # Check if refresh token is expired
+    from datetime import datetime, timezone
+    if user.refresh_token_expires and user.refresh_token_expires < datetime.now(timezone.utc):
+        # Clear the refresh token from database
+        user.refresh_token = None
+        user.refresh_token_expires = None
+        user_repo.update()
+        
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token has expired"
+        )
+    
+    # Check if user is active
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User account is deactivated"
+        )
+    
+    # Generate new access token
+    access_token = create_access_token(user.id)
+    
+    # Token rotation: generate new refresh token
+    new_refresh_token = create_refresh_token(user.id)
+    
+    # Update user with new refresh token
+    from datetime import timedelta
+    user.refresh_token = new_refresh_token
+    user.refresh_token_expires = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    user_repo.update()
+    
+    # Set new refresh token in httpOnly cookie
+    response.set_cookie(
+        key="refresh_token",
+        value=new_refresh_token,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite="lax",
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60  # Convert days to seconds
+    )
+    
+    # Return new access token and user info
+    from app.schemas.schemas import UserResponse
+    return AuthResult(
+        token=access_token,
+        user=UserResponse(
+            id=user.id,
+            name=user.name,
+            email=user.email,
+            role=user.role
+        ),
+        message="Token refreshed successfully"
+    )

@@ -149,30 +149,49 @@ class PaynowClient:
 
     def generate_signature(self, fields: Dict[str, str]) -> str:
         """
-        Builds the Paynow API signature by joining sorted key values
-        and hashing the payload with SHA512 using the integration key.
-        Used for webhook callback verification.
-
-        Algorithm (matches Paynow's PHP SDK):
-        1. Take all fields except 'hash'
-        2. Sort keys alphabetically
-        3. Concatenate the VALUES (not key=value pairs)
-        4. Append the integration key
-        5. SHA512 hash
-
-        BUG 3 FIX: Returns LOWERCASE hex (matching Paynow's behavior).
-        Previously returned .upper() which broke comparison since
-        Paynow sends hashes in lowercase.
+        Builds the Paynow API signature according to official documentation.
+        
+        Algorithm (from Paynow docs):
+        1. Concatenate the values in the message for each element in their raw form
+        2. Append the Integration Key
+        3. UTF8 encode the string
+        4. Create a SHA512 hash of the string
+        5. Output the result as UPPERCASE hexadecimal
+        
+        IMPORTANT: Do NOT sort keys - concatenate values in their original order
+        IMPORTANT: Do NOT URL encode values if from form post (already decoded)
         """
         import hashlib
-        sorted_keys = sorted(fields.keys())
-        values_chain = "".join(str(fields[k]) for k in sorted_keys if k.lower() != "hash")
+        from urllib.parse import unquote
+        
+        # Concatenate values in original order, excluding 'hash' field
+        values_chain = ""
+        for key, value in fields.items():
+            if key.lower() != "hash":
+                # URL decode the value if it's from a result string
+                # (form posts are already decoded)
+                decoded_value = unquote(str(value))
+                values_chain += decoded_value
+        
+        # Append integration key
         combined = f"{values_chain}{self.integration_key}"
-        return hashlib.sha512(combined.encode("utf-8")).hexdigest()
+        
+        # UTF8 encode, SHA512 hash, and output as UPPERCASE hexadecimal
+        return hashlib.sha512(combined.encode("utf-8")).hexdigest().upper()
 
     def verify_callback(self, fields: Dict[str, str]) -> bool:
         """
         Verifies the authenticity of status notification webhooks from Paynow.
+        
+        Algorithm (from Paynow docs):
+        1. Split message by & to get key/value pairs
+        2. Split each by = to get key and value
+        3. Join all values EXCEPT hash
+        4. URL DECODE each value before joining
+        5. Append integration key
+        6. SHA512 hash
+        7. Convert to UPPERCASE hexadecimal
+        8. Compare with inbound hash
 
         SECURITY: In production, a valid SHA512 hash is MANDATORY.
         Callbacks without a hash are ALWAYS rejected to prevent forged
@@ -187,12 +206,9 @@ class PaynowClient:
             return False
 
         expected_hash = self.generate_signature(fields)
-        # C2 FIX: Case-insensitive comparison. Paynow may send the hash
-        # in either case depending on their implementation. Previously
-        # the code used .upper() on the generated hash but compared
-        # against the raw incoming hash, guaranteeing a mismatch if
-        # Paynow sent lowercase.
-        if expected_hash.lower() != incoming_hash.lower():
+        
+        # Case-insensitive comparison for robustness, but both should be uppercase
+        if expected_hash.upper() != incoming_hash.upper():
             logger.error(
                 f"Paynow callback REJECTED: hash mismatch. "
                 f"Expected: {expected_hash[:16]}..., Got: {incoming_hash[:16]}..."

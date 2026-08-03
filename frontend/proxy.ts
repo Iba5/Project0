@@ -6,8 +6,9 @@ export default function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   if (pathname.startsWith('/admin') && !PUBLIC_ADMIN_PATHS.some(p => pathname === p || pathname.startsWith(p + '/'))) {
-    const token = request.cookies.get('vw_session')?.value
-    if (!token) {
+    // Check for the refresh_token cookie that the backend sets
+    const refreshToken = request.cookies.get('refresh_token')?.value
+    if (!refreshToken) {
       const loginUrl = new URL('/admin/login', request.url)
       loginUrl.searchParams.set('next', pathname)
       return NextResponse.redirect(loginUrl)

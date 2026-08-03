@@ -9,12 +9,14 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.exceptions import RequestValidationError
 from sqlalchemy.sql import text
+import socketio
 
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.api.v1.api import api_router
 from app.middleware.middleware import RequestLoggingMiddleware, RateLimitingMiddleware
 from app.exceptions.exceptions import VotingException
+from app.core.errors import app_error_handler
 
 # Validate critical secrets at import time (fails fast before any route is registered)
 settings.validate_secrets()
@@ -29,7 +31,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# H6 FIX: Use lifespan context manager instead of deprecated @app.on_event("startup")
+
+# Lifespan context manager replacing deprecated @app.on_event
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from app.core.redis import init_redis, close_redis
@@ -41,16 +44,30 @@ async def lifespan(app: FastAPI):
     finally:
         await close_redis()
 
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="Backend API for managing contestants, events, payments, and vote allocations.",
     version="1.0.0",
-    openapi_url=f"{settings.API_V1_STR}/openapi.json",
-    docs_url=f"{settings.API_V1_STR}/docs",
-    redoc_url=f"{settings.API_V1_STR}/redoc",
+    openapi_url=f"{settings.API_V1_STR}/openapi.json" if settings.DEBUG else None,
+    docs_url=f"{settings.API_V1_STR}/docs" if settings.DEBUG else None,
+    redoc_url=f"{settings.API_V1_STR}/redoc" if settings.DEBUG else None,
     lifespan=lifespan,
     redirect_slashes=False,
 )
+
+# --- Socket.IO Engine Initialization ---
+# Parse CORS origins for Socket.IO
+_socketio_cors_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()] if settings.CORS_ORIGINS else []
+
+sio = socketio.AsyncServer(
+    async_mode='asgi',
+    cors_allowed_origins=_socketio_cors_origins if not settings.DEBUG else '*',
+    always_connect=True
+)
+
+# FIX: Set socketio_path="" so ASGIApp routes requests relative to where FastAPI mounts it (/socket.io)
+sio_app = socketio.ASGIApp(socketio_server=sio, socketio_path="")
 
 # --- Middleware Registrations ---
 
@@ -78,7 +95,7 @@ app.add_middleware(
     minimum_size=1000
 )
 
-# 4. Redis-Backed IP Rate Limiter (falls back to in-memory if Redis is down)
+# 4. Redis-Backed IP Rate Limiter
 app.add_middleware(
     RateLimitingMiddleware
 )
@@ -91,13 +108,34 @@ app.add_middleware(
 # Global router inclusion
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
+# --- Socket.IO Routing & Mount ---
+# Mount Socket.IO directly onto the FastAPI application
+app.mount("/socket.io", sio_app)
+
+# --- Socket.IO Event Handlers ---
+
+@sio.event
+async def connect(sid, environ):
+    logger.info(f"[Socket.IO] Client connected safely: {sid}")
+
+@sio.event
+async def disconnect(sid):
+    logger.info(f"[Socket.IO] Client disconnected safely: {sid}")
+
+@sio.on("join:participant")
+async def handle_join_participant(sid, participant_id):
+    logger.info(f"[Socket.IO] Client {sid} joining channel room: {participant_id}")
+    await sio.enter_room(sid, participant_id)
+
+@sio.on("leave:participant")
+async def handle_leave_participant(sid, participant_id):
+    logger.info(f"[Socket.IO] Client {sid} leaving channel room: {participant_id}")
+    await sio.leave_room(sid, participant_id)
+
 # --- Standardized Exception Handlers ---
 
 @app.exception_handler(VotingException)
 async def voting_exception_handler(request: Request, exc: VotingException):
-    """
-    Standardized handler for custom business logic exceptions.
-    """
     logger.warning(f"Business logic exception on {request.url.path}: {exc.message}")
     return JSONResponse(
         status_code=exc.status_code,
@@ -110,11 +148,8 @@ async def voting_exception_handler(request: Request, exc: VotingException):
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """
-    Standardized handler for FastAPI validation failures.
-    """
     logger.warning(f"Validation failure on {request.url.path}: {exc.errors()}")
-    errors_list :List[Dict[str,Any]] = [
+    errors_list: List[Dict[str, Any]] = [
         {"field": " -> ".join(map(str, err["loc"])), "message": err["msg"]}
         for err in exc.errors()
     ]
@@ -127,32 +162,16 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         }
     )
 
-@app.exception_handler(Exception)
-async def generic_exception_handler(request: Request, exc: Exception):
-    """
-    Central fallback exception handler preventing stack traces and technical details leaks.
-    """
-    logger.exception(f"Unhandled system exception on {request.url.path}: {str(exc)}")
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={
-            "success": False,
-            "message": "An internal server error occurred. Please contact support.",
-            "errors": []
-        }
-    )
+# Add our comprehensive error handler
+app.add_exception_handler(Exception, app_error_handler)
 
 # --- Production Infrastructure Endpoints ---
 
 @app.get("/health", tags=["health"])
 def health_check():
-    """
-    Public health check monitoring endpoint validating API, Database, and mock Storage state.
-    """
     uptime = time.time() - APP_START_TIME
     db_status = "connected"
     
-    # Try querying the DB with proper resource cleanup
     db = SessionLocal()
     try:
         db.execute(text("SELECT 1"))
@@ -165,7 +184,7 @@ def health_check():
     return {
         "status": "healthy" if db_status == "connected" else "unhealthy",
         "database": db_status,
-        "storage": "connected",  # Placeholder for Supabase Storage check
+        "storage": "connected",
         "version": "1.0.0",
         "uptime": f"{uptime:.2f}s"
     }

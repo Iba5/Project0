@@ -3,6 +3,7 @@ from typing import Any, Dict, Union
 from jose import jwt,JWTError
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
+import uuid
 from app.core.config import settings
 
 ph = PasswordHasher()
@@ -54,6 +55,47 @@ def decode_access_token(token: str) -> Union[dict[str,Any], None]:
         decoded = jwt.decode(
             token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
         )
+        return decoded
+    except JWTError:
+        return None
+
+def create_refresh_token(
+    subject: Union[str, Any], expires_delta: timedelta | None = None
+) -> str:
+    """
+    Generates a JWT refresh token for a subject (e.g. user ID or email).
+    Refresh tokens have longer expiration times than access tokens.
+    """
+    if expires_delta:
+        expire = datetime.now(timezone.utc) + expires_delta
+    else:
+        # Default to configured refresh token expiration (7 days)
+        expire = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    
+    to_encode: Dict[str,Any] = {
+        "exp": expire,
+        "sub": str(subject),
+        "type": "refresh",
+        "jti": str(uuid.uuid4())  # Unique identifier for token rotation
+    }
+    
+    encoded_jwt = jwt.encode(
+        to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM
+    )
+    return encoded_jwt
+
+def decode_refresh_token(token: str) -> Union[dict[str,Any], None]:
+    """
+    Decodes and validates a JWT refresh token.
+    Returns the claims dict if valid, otherwise None.
+    """
+    try:
+        decoded = jwt.decode(
+            token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
+        )
+        # Verify this is a refresh token
+        if decoded.get("type") != "refresh":
+            return None
         return decoded
     except JWTError:
         return None

@@ -19,26 +19,24 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade():
-    op.add_column(
-        "users",
-        sa.Column(
-            "failed_login_count",
-            sa.Integer(),
-            nullable=False,
-            server_default="0",
-        ),
+    # Use IF NOT EXISTS to make this migration idempotent across databases
+    # Some environments already have these columns (created manually or by other means).
+    op.execute(
+        """
+        ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS failed_login_count INTEGER DEFAULT 0 NOT NULL;
+        """
     )
 
-    op.add_column(
-        "users",
-        sa.Column(
-            "locked_until",
-            sa.DateTime(timezone=True),
-            nullable=True,
-        ),
+    op.execute(
+        """
+        ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP WITH TIME ZONE NULL;
+        """
     )
 
 
 def downgrade():
-    op.drop_column("users", "locked_until")
-    op.drop_column("users", "failed_login_count")
+    # Use IF EXISTS to avoid errors if columns are already removed or absent.
+    op.execute("ALTER TABLE users DROP COLUMN IF EXISTS locked_until;")
+    op.execute("ALTER TABLE users DROP COLUMN IF EXISTS failed_login_count;")

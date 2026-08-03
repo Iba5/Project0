@@ -127,3 +127,4 @@ media/
 .zcode/
 .vercel
 .env*
+ *.md

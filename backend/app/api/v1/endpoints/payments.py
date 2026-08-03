@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Form, Query, Request, status as http_status
 from sqlalchemy.orm import Session
@@ -14,7 +15,7 @@ from app.schemas.schemas import (
     VoterCheckResponse, VoterDetailsUpdate, PaymentStatusCheckResponse
 )
 from app.repositories.repositories import paginate_response
-from app.models.models import User
+from app.models.models import User, TestPayment
 
 router = APIRouter()
 
@@ -41,6 +42,14 @@ def check_voter(
 
 
 @router.post(
+    "",
+    summary="Initiate vote payment",
+)
+@router.post(
+    "/",
+    summary="Initiate vote payment (alias)",
+)
+@router.post(
     "/initiate",
     summary="Initiate vote payment (enhanced)",
     description=(
@@ -62,7 +71,9 @@ def initiate_payment(payment_in: PaymentCreate, request: Request, db: Session = 
             logger.warning(f"Invalid source_platform query param: {src}")
 
     payment_service = PaymentService(db)
-    result = payment_service.initiate_payment(payment_in)
+    # Read optional Idempotency-Key header from the client to persist and detect retries
+    idempotency_key = request.headers.get("Idempotency-Key") or request.headers.get("Idempotency-Key".lower())
+    result = payment_service.initiate_payment(payment_in, idempotency_key=idempotency_key)
     
     # If duplicate warning, return 409 to signal frontend to show warning
     if result.get("has_voted") and result.get("warning"):
@@ -114,49 +125,42 @@ def update_voter_details(
         "3) Dual verification via poll_url, 4) ACID vote crediting."
     ),
 )
-def paynow_callback(
-    reference: str = Form(...),
-    paynow_status: str = Form(..., alias="status"),
-    pollurl: str = Form(""),
-    hash_value: str = Form("", alias="hash"),
-    amount: Optional[str] = Form(""),
-    paynowreference: Optional[str] = Form(""),
+async def paynow_callback(
+    request: Request,
     db: Session = Depends(get_db)
 ):
     """
     Validates webhook signatures and credits vote transactions.
-
-    FIX NOTES:
-    - Bug 1: Removed duplicate `default=` arg from Form() calls.
-    - Bug 2: Renamed `status` param to `paynow_status` to avoid shadowing
-      FastAPI's `status` module. Uses `alias="status"` so Paynow's
-      `status` field is still accepted.
-    - Bug 4: Now accepts ALL fields Paynow sends (amount, paynowreference)
-      so the signature can be correctly verified over the complete payload.
+    
+    IMPORTANT: Receives ALL fields from Paynow callback as form data.
+    According to Paynow docs, all fields must be included in hash verification,
+    except the 'hash' field itself.
     """
-    if not reference or not reference.strip():
+    payment_service = PaymentService(db)
+    
+    # Parse form data from request
+    form_data = await request.form()
+    
+    # Convert to dictionary, including ALL fields Paynow sends
+    # This ensures hash verification includes all fields
+    callback_data = {key: value for key, value in form_data.items()}
+    
+    # Log received fields for debugging
+    logger.info(f"Paynow callback received for reference: {callback_data.get('reference')}")
+    logger.debug(f"Callback fields: {list(callback_data.keys())}")
+    
+    if not callback_data.get("reference"):
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Missing required 'reference' field in callback."
         )
-    if not paynow_status or not paynow_status.strip():
+    
+    if not callback_data.get("status"):
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Missing required 'status' field in callback."
         )
-
-    payment_service = PaymentService(db)
-    # Bug 4 FIX: Include ALL fields from Paynow's webhook payload.
-    # Paynow signs over every field (sorted alphabetically, excluding 'hash').
-    # If we omit fields here, our computed hash will never match theirs.
-    callback_data = {
-        "reference": reference.strip(),
-        "status": paynow_status.strip(),
-        "pollurl": pollurl.strip() if pollurl else "",
-        "amount": amount.strip() if amount else "",
-        "paynowreference": paynowreference.strip() if paynowreference else "",
-        "hash": hash_value.strip() if hash_value else "",
-    }
+    
     payment_service.process_paynow_callback(callback_data)
     return {"status": "ok"}
 
@@ -171,3 +175,207 @@ def list_payments(pagination: PaginationParams = Depends(), db: Session = Depend
     payment_service = PaymentService(db)
     items, total = payment_service.list_payments(pagination.offset, pagination.limit)
     return paginate_response(items, total, pagination.page, pagination.page_size)
+
+
+# =============================================================================
+# TEST PAYMENT ENDPOINTS (Development Only)
+# =============================================================================
+
+@router.post(
+    "/test/{reference}/complete",
+    summary="Complete a test payment (development only)",
+    description="Simulates payment completion for test payments. Only works when TEST_PAYMENT_MODE=true."
+)
+def complete_test_payment(
+    reference: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Simulates payment completion for test payments in development mode.
+    This endpoint creates a real Payment record and VoteTransaction to test the full payment flow.
+    """
+    from app.core.config import settings
+    from app.repositories.repositories import TestPaymentRepository, ParticipantRepository, VoteTransactionRepository
+    from app.enums.enums import PaymentStatus
+    from app.models.models import Payment, VoteTransaction
+    from app.audit.audit import AuditService
+    
+    if not settings.TEST_PAYMENT_MODE:
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail="Test payment completion is only available in TEST_PAYMENT_MODE"
+        )
+    
+    # Find the test payment
+    test_payment_repo = TestPaymentRepository(db)
+    test_payment = test_payment_repo.get_by_reference(reference)
+    
+    if not test_payment:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail=f"Test payment with reference {reference} not found"
+        )
+    
+    if test_payment.status != "created":
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail=f"Test payment already has status: {test_payment.status}"
+        )
+    
+    # Validate contestant exists
+    part_repo = ParticipantRepository(db)
+    contestant = part_repo.get_by_id(test_payment.contestant_id)
+    if not contestant:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Contestant not found"
+        )
+    
+    # Create real payment record
+    real_payment = Payment(
+        reference=test_payment.reference,
+        contestant_id=test_payment.contestant_id,
+        amount=test_payment.amount,
+        payment_method=test_payment.payment_method,
+        status=PaymentStatus.PAID,
+        voter_phone=test_payment.voter_phone,
+        voter_email=test_payment.voter_email,
+        source_platform=test_payment.source_platform,
+        competition_id=test_payment.competition_id,
+        poll_url="test_mode",
+        paynow_redirect_url=test_payment.test_redirect_url
+    )
+    db.add(real_payment)
+    db.flush()
+    
+    # Create vote transaction
+    vote_transaction = VoteTransaction(
+        payment_id=real_payment.id,
+        contestant_id=test_payment.contestant_id,
+        votes_awarded=1,  # Default 1 vote per payment
+        competition_id=test_payment.competition_id
+    )
+    db.add(vote_transaction)
+    
+    # Increment contestant votes
+    contestant.votes += 1
+    
+    # Update test payment status
+    test_payment.status = "completed"
+    test_payment.updated_at = datetime.now()
+    
+    db.commit()
+    
+    # Log the test payment completion
+    AuditService.log_action(
+        db=db,
+        action="Test Payment Completed",
+        details=f"Test payment {reference} completed for contestant {contestant.name} (${test_payment.amount})"
+    )
+    
+    logger.info(f"Test payment {reference} completed successfully for contestant {contestant.name}")
+    
+    return {
+        "status": "completed",
+        "reference": reference,
+        "contestant_name": contestant.name,
+        "amount": str(test_payment.amount),
+        "votes_awarded": 1,
+        "test_mode": True
+    }
+
+
+@router.get(
+    "/test/list",
+    summary="List all test payments (development only)",
+    description="Returns all test payments for monitoring. Only works when TEST_PAYMENT_MODE=true.",
+    dependencies=[allow_read_payments]
+)
+def list_test_payments(
+    db: Session = Depends(get_db)
+):
+    """
+    Lists all test payments for monitoring purposes.
+    Only available in test payment mode.
+    """
+    from app.core.config import settings
+    from app.repositories.repositories import TestPaymentRepository
+    
+    if not settings.TEST_PAYMENT_MODE:
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail="Test payment monitoring is only available in TEST_PAYMENT_MODE"
+        )
+    
+    test_payment_repo = TestPaymentRepository(db)
+    test_payments = test_payment_repo.get_all_test_payments()
+    
+    return {
+        "test_payments": [
+            {
+                "reference": tp.reference,
+                "contestant_id": tp.contestant_id,
+                "amount": str(tp.amount),
+                "payment_method": tp.payment_method,
+                "status": tp.status,
+                "voter_phone": tp.voter_phone,
+                "voter_email": tp.voter_email,
+                "source_platform": tp.source_platform,
+                "competition_id": tp.competition_id,
+                "test_redirect_url": tp.test_redirect_url,
+                "created_at": tp.created_at.isoformat() if tp.created_at else None,
+                "updated_at": tp.updated_at.isoformat() if tp.updated_at else None,
+                "auto_complete": tp.auto_complete,
+                "test_completion_delay": tp.test_completion_delay
+            }
+            for tp in test_payments
+        ],
+        "total": len(test_payments)
+    }
+
+
+@router.delete(
+    "/test/cleanup",
+    summary="Delete all test payments (development only)",
+    description="Deletes all test payments from the database. Only works when TEST_PAYMENT_MODE=true.",
+    dependencies=[allow_read_payments]
+)
+def cleanup_test_payments(
+    db: Session = Depends(get_db)
+):
+    """
+    Deletes all test payments from the database.
+    Only available in test payment mode for cleanup.
+    """
+    from app.core.config import settings
+    from app.repositories.repositories import TestPaymentRepository
+    from app.audit.audit import AuditService
+    
+    if not settings.TEST_PAYMENT_MODE:
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail="Test payment cleanup is only available in TEST_PAYMENT_MODE"
+        )
+    
+    test_payment_repo = TestPaymentRepository(db)
+    test_payments = test_payment_repo.get_all_test_payments()
+    
+    deleted_count = 0
+    for tp in test_payments:
+        test_payment_repo.delete(tp)
+        deleted_count += 1
+    
+    # Log the cleanup
+    AuditService.log_action(
+        db=db,
+        action="Test Payments Cleanup",
+        details=f"Deleted {deleted_count} test payments"
+    )
+    
+    logger.info(f"Cleaned up {deleted_count} test payments")
+    
+    return {
+        "status": "completed",
+        "deleted_count": deleted_count,
+        "message": f"Successfully deleted {deleted_count} test payments"
+    }

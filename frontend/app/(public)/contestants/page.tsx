@@ -1,5 +1,5 @@
-import { ContestantsPage } from '@/components/pages/contestants-page'
+import ContestantsView from '@/components/views/contestants-view'
 
-export default function ContestantsRoute() {
-  return <ContestantsPage />
+export default function Page() {
+  return <ContestantsView />
 }

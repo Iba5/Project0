@@ -2,6 +2,7 @@ import time
 import uuid
 import logging
 import threading
+import os
 from typing import Dict, Tuple, Optional
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
@@ -11,18 +12,20 @@ from starlette.middleware.base import (
 )
 from redis.asyncio import Redis
 from starlette.responses import Response
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 # --- Rate Limit Configuration ---
-LIMIT_WINDOW_SECONDS = 60
-MAX_REQUESTS_PER_WINDOW = 60
+# More restrictive limits for production security
+# These can be overridden via environment variables
+LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
+MAX_REQUESTS_PER_WINDOW = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "60"))  # 60 requests per minute
 
-PAYMENT_LIMIT_WINDOW_SECONDS = 60
-MAX_PAYMENT_REQUESTS_PER_WINDOW = 10
+PAYMENT_LIMIT_WINDOW_SECONDS = int(os.getenv("PAYMENT_RATE_LIMIT_WINDOW_SECONDS", "60"))
+MAX_PAYMENT_REQUESTS_PER_WINDOW = int(os.getenv("PAYMENT_RATE_LIMIT_MAX_REQUESTS", "5"))  # 5 payment attempts per minute (strict)
 
 # --- In-Memory Fallback (used when Redis is unavailable) ---
-# This is only used as a degradation path. Redis is the primary backend.
 _in_memory_limits: Dict[str, Tuple[int, float]] = {}
 _in_memory_payment_limits: Dict[str, Tuple[int, float]] = {}
 _fallback_lock = threading.Lock()
@@ -78,11 +81,6 @@ async def _check_redis_rate_limit(
     """
     Redis-based sliding window rate limit using INCR + EXPIRE.
     Returns True if ALLOWED, False if blocked.
-    
-    Uses a simple fixed-window counter:
-    - INCR the key
-    - If first request in window, set EXPIRE
-    - If count > max, block
     """
     try:
         current: int = await redis_client.incr(key)
@@ -103,16 +101,16 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
     
     Primary: Redis INCR/EXPIRE for atomic, multi-worker-safe counting.
     Fallback: In-memory dict if Redis is unavailable (single-worker only).
-    
-    Two tiers:
-    - Global: 60 requests/minute per IP
-    - Payment /initiate: 10 requests/minute per IP (stricter)
     """
     async def dispatch(
-    self,
-    request: Request,
-    call_next: RequestResponseEndpoint,
+        self,
+        request: Request,
+        call_next: RequestResponseEndpoint,
     ) -> Response:
+        # Bypass Socket.IO long-polling and websocket upgrades entirely
+        if request.url.path.startswith("/socket.io"):
+            return await call_next(request)
+
         client_ip = request.client.host if request.client else "127.0.0.1"
         path = request.url.path.lower()
 
@@ -133,7 +131,6 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
             if redis_ok is False:
                 # Blocked by Redis
                 return self._rate_limit_response(client_ip, is_payment_init)
-            # If redis_ok is None (Redis error), fall through to in-memory
 
         # In-memory fallback
         if redis_ok is not True:
@@ -155,10 +152,10 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
     async def _check_redis(
-    self,
-    client_ip: str,
-    is_payment_init: bool,
-    redis_client: Redis,
+        self,
+        client_ip: str,
+        is_payment_init: bool,
+        redis_client: Redis,
     ) -> Optional[bool]:
         """Check rate limit via Redis. Returns True/False/None (error)."""
         try:
@@ -200,7 +197,11 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
     Middleware generating unique request IDs, tracking duration,
     enforcing security headers, and writing standard logging formats.
     """
-    async def dispatch(self, request: Request, call_next:RequestResponseEndpoint) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        # Bypass Socket.IO long-polling requests from custom headers/logging locks
+        if request.url.path.startswith("/socket.io"):
+            return await call_next(request)
+
         request_id = str(uuid.uuid4())
         request.state.request_id = request_id
         
@@ -216,17 +217,42 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' https://cdn.redoc.ly; "
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-            "img-src 'self' data:; "
-            "font-src 'self' https://fonts.gstatic.com"
-        )
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         
-        # Log entry satisfying the Logging Policy
-        # Does NOT log passwords, tokens, or authorization headers
+        # Content Security Policy - restrictive for production
+        if settings.DEBUG:
+            # More permissive CSP for development
+            csp = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.redoc.ly; "
+                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+                "img-src 'self' data: https:; "
+                "font-src 'self' https://fonts.gstatic.com; "
+                "connect-src 'self' https://api.redoc.ly https://*.supabase.co wss://*.supabase.co; "
+                "frame-ancestors 'none';"
+            )
+        else:
+            # Strict CSP for production
+            csp = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' https://cdn.redoc.ly; "
+                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+                "img-src 'self' data: https:; "
+                "font-src 'self' https://fonts.gstatic.com; "
+                "connect-src 'self' https://api.redoc.ly; "
+                "frame-ancestors 'none'; "
+                "base-uri 'self'; "
+                "form-action 'self';"
+            )
+        response.headers["Content-Security-Policy"] = csp
+        
+        # HSTS - only in production with HTTPS
+        if not settings.DEBUG:
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
+        
+        # Additional security headers
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        
         client_ip = request.client.host if request.client else "unknown"
         user_id = getattr(request.state, "user_id", "anonymous")
         

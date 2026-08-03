@@ -71,3 +71,19 @@ class SourcePlatform(str, Enum):
 
 # Strict whitelist for URL parameter validation
 ALLOWED_SOURCE_PLATFORMS = {e.value for e in SourcePlatform}
+
+class PaymentMethod(str, Enum):
+    """Supported payment methods for voting"""
+    VISA = "visa"
+    MASTERCARD = "mastercard"
+    PAYPAL = "paypal"
+    ECOCASH = "ecocash"
+    ONEMONEY = "onemoney"
+    ZIPIT = "zipit"
+    VOUCHER = "voucher"
+
+class PaymentMethodType(str, Enum):
+    """Type of payment method"""
+    WEB = "web"  # Redirect-based payments (Visa, MasterCard, PayPal)
+    MOBILE = "mobile"  # Mobile money payments (EcoCash, OneMoney, Zipit)
+    OFFLINE = "offline"  # Offline/voucher payments

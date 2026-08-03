@@ -30,6 +30,27 @@ export type PaymentStatus =
 
 export type SocialPlatformType = "TikTok" | "Facebook" | "Instagram" | "YouTube"
 
+export type ViewName =
+  | "landing"
+  | "contestants"
+  | "contestant-detail"
+  | "leaderboard"
+  | "events"
+  | "payment"
+  | "top-voters"
+  | "favorites"
+  | "admin-login"
+  | "admin-dashboard"
+  | "admin-events"
+  | "admin-participants"
+  | "admin-payments"
+  | "admin-admins"
+  | "admin-settings"
+  | "admin-social-router"
+  | "admin-forgot-password"
+  | "compare"
+  | "notifications"
+
 export type EventRecord = {
   id: string
   name: string
@@ -54,10 +75,11 @@ export type ParticipantRecord = {
   category: string
   platform: SocialPlatformType
   videoUrl: string
+  imageUrl: string | null
+  thumbnailUrl: string | null
+  bio: string | null
   status: ContestantStatus
   votes: number
-  bio: string | null
-  imageUrl: string | null
   eventId: string | null
 }
 
@@ -70,6 +92,42 @@ export type PaymentRecord = {
   paymentMethod: string
   status: PaymentStatus
   date: string
+}
+
+export type VoterMeResponse = {
+  user: {
+    id: string
+    name: string
+    email: string
+    role: string
+  }
+  voterProfile: {
+    id: string
+    phone: string | null
+    votesCount: number
+  }
+  totalSpent: number
+  totalVotes: number
+  votedContestantsCount: number
+  favoriteCategory: string | null
+  votedContestants: Array<{
+    id: string
+    name: string
+    category: string | null
+    imageUrl: string | null
+    thumbnailUrl: string | null
+    totalVotes: number
+    totalSpent: number
+  }>
+  recentVotes: Array<{
+    id: string
+    date: string
+    contestantName: string
+    contestantId: string | null
+    amount: number
+    status: string
+    paymentMethod: string
+  }>
 }
 
 export type ActivityRecord = {
@@ -117,26 +175,10 @@ export type PaymentMethodOption = {
   isPrimary?: boolean
 }
 
-export type ViewName =
-  | "landing"
-  | "contestants"
-  | "contestant-detail"
-  | "payment"
-  | "leaderboard"
-  | "admin-login"
-  | "admin-dashboard"
-  | "admin-events"
-  | "admin-participants"
-  | "admin-payments"
-  | "admin-admins"
-  | "admin-settings"
-  | "admin-social-router"
-  | "admin-forgot-password"
-
 export type SocialPlatformStatus = {
   id: string
   platform: string
   status: "Connected" | "Syncing" | "Failed" | "Disconnected"
-  lastSync: string
-  detail: string
+  lastSync: string | null
+  detail: string | null
 }
