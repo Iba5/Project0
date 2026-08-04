@@ -34,6 +34,20 @@ def get_computed_event_status(
     """
     now = datetime.now(timezone.utc)
     
+    # Safety check: Ensure all datetime parameters are timezone-aware
+    if start_date and start_date.tzinfo is None:
+        start_date = start_date.replace(tzinfo=timezone.utc)
+    if end_date and end_date.tzinfo is None:
+        end_date = end_date.replace(tzinfo=timezone.utc)
+    if registration_opens and registration_opens.tzinfo is None:
+        registration_opens = registration_opens.replace(tzinfo=timezone.utc)
+    if registration_closes and registration_closes.tzinfo is None:
+        registration_closes = registration_closes.replace(tzinfo=timezone.utc)
+    if voting_opens and voting_opens.tzinfo is None:
+        voting_opens = voting_opens.replace(tzinfo=timezone.utc)
+    if voting_closes and voting_closes.tzinfo is None:
+        voting_closes = voting_closes.replace(tzinfo=timezone.utc)
+    
     # Administrative states take precedence
     if event_status == EventStatus.DRAFT:
         return "draft"
@@ -97,6 +111,20 @@ def validate_event_timeline(
     6. Overlapping or contradictory timelines are rejected
     """
     errors = []
+    
+    # Safety check: Ensure all datetime parameters are timezone-aware
+    if start_date and start_date.tzinfo is None:
+        start_date = start_date.replace(tzinfo=timezone.utc)
+    if end_date and end_date.tzinfo is None:
+        end_date = end_date.replace(tzinfo=timezone.utc)
+    if registration_opens and registration_opens.tzinfo is None:
+        registration_opens = registration_opens.replace(tzinfo=timezone.utc)
+    if registration_closes and registration_closes.tzinfo is None:
+        registration_closes = registration_closes.replace(tzinfo=timezone.utc)
+    if voting_opens and voting_opens.tzinfo is None:
+        voting_opens = voting_opens.replace(tzinfo=timezone.utc)
+    if voting_closes and voting_closes.tzinfo is None:
+        voting_closes = voting_closes.replace(tzinfo=timezone.utc)
     
     # Basic existence checks
     if not start_date or not end_date:
