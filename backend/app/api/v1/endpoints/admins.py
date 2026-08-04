@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from app.core.database import get_db
-from app.api.v1.dependencies import PermissionChecker
+from app.api.v1.dependencies import PermissionChecker, get_current_active_user
 from app.enums.enums import Permission
 from app.models.models import User
 from app.schemas.schemas import UserResponse
@@ -12,6 +12,7 @@ from app.repositories.repositories import UserRepository
 router = APIRouter()
 
 allow_manage_admins = Depends(PermissionChecker(Permission.ADMINS_MANAGE))
+allow_authenticated = Depends(get_current_active_user)
 
 # Helper logic to avoid code duplication
 def fetch_and_format_admins(db: Session):
@@ -33,26 +34,25 @@ def fetch_and_format_admins(db: Session):
 @router.get(
     "",
     summary="List All Admins",
-    description="Get list of all admin users. Requires admins.manage permission.",
-    dependencies=[allow_manage_admins]
+    description="Get list of all admin users. Requires authentication."
 )
-def list_admins(db: Session = Depends(get_db)):
+def list_admins(current_user: User = allow_authenticated, db: Session = Depends(get_db)):
     return fetch_and_format_admins(db)
 
 
 @router.get(
     "/list",
     summary="List All Admins (alias)",
-    description="Get list of all admin users.",
-    dependencies=[allow_manage_admins]
+    description="Get list of all admin users. Requires authentication."
 )
-def list_admins_alias(db: Session = Depends(get_db)):
+def list_admins_alias(current_user: User = allow_authenticated, db: Session = Depends(get_db)):
     return fetch_and_format_admins(db)
 
 
 @router.post(
     "",
     summary="Invite a new admin",
+    description="Requires admins.manage permission (super admin only)",
     dependencies=[allow_manage_admins]
 )
 def invite_admin(
@@ -65,6 +65,7 @@ def invite_admin(
 @router.post(
     "/",
     summary="Invite a new admin (alias)",
+    description="Requires admins.manage permission (super admin only)",
     dependencies=[allow_manage_admins]
 )
 def invite_admin_alias(
