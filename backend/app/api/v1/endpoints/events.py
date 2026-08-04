@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -21,7 +21,7 @@ allow_delete = Depends(PermissionChecker(Permission.EVENTS_DELETE))
 @router.get(
     "/",
     summary="List all events (paginated)",
-    dependencies=[allow_read]
+    description="Public endpoint - returns all events, frontend filters drafts for public users"
 )
 def list_events(pagination: PaginationParams = Depends(), db: Session = Depends(get_db)):
     event_service = EventService(db)
@@ -68,11 +68,12 @@ def get_event(event_id: str, db: Session = Depends(get_db)):
     "/",
     response_model=EventResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Create a new event"
+    summary="Create a new event",
+    dependencies=[allow_create]
 )
 def create_event(
     event_in: EventCreate,
-    current_user: User = allow_create,
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     event_service = EventService(db, user_id=current_user.id)

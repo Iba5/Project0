@@ -23,11 +23,12 @@ def list_public_participants(
     pagination: PaginationParams = Depends(),
     db: Session = Depends(get_db),
 ):
+    """Public endpoint - returns approved participants only"""
     part_service = ParticipantService(db)
 
     # Use synchronous version for now (async version requires event loop)
     items, total = part_service.list_participants(
-        search, status, competition_id, pagination.offset, pagination.limit
+        search, ContestantStatus.APPROVED, competition_id, pagination.offset, pagination.limit
     )
 
     return paginate_response(
@@ -40,6 +41,7 @@ def list_public_participants(
 @router.get(
     "/",
     summary="List and filter contestants (paginated)",
+    description="Admin endpoint - returns all participants including drafts",
     dependencies=[allow_read]
 )
 def list_participants(
@@ -49,13 +51,13 @@ def list_participants(
     pagination: PaginationParams = Depends(),
     db: Session = Depends(get_db)
 ):
+    """Admin endpoint - requires authentication"""
     part_service = ParticipantService(db)
     items, total = part_service.list_participants(
         search, status, competition_id,
         pagination.offset, pagination.limit
     )
-    # Return format matching frontend expectation
-    return {"participants": items, "total": total}
+    return paginate_response(items, total, pagination.page, pagination.page_size)
 
 
 # C4 FIX: /leaderboard, /compare, /bulk MUST be registered before /{part_id}

@@ -215,7 +215,7 @@ export default function ContestantsView() {
     async function loadParticipants() {
       try {
         const data = await getPublicParticipants(1, 100)
-        if (mounted) setParticipants(Array.isArray(data?.participants) ? data.participants : [])
+        if (mounted) setParticipants(Array.isArray(data?.items) ? data.items : [])
       } catch {
         // silent
       } finally {
@@ -265,7 +265,7 @@ export default function ContestantsView() {
     const interval = setInterval(async () => {
       try {
         const data = await getPublicParticipants(1, 100)
-        const nextParticipants = Array.isArray(data?.participants) ? data.participants : []
+        const nextParticipants = Array.isArray(data?.items) ? data.items : []
         setParticipants((prev) => {
           const prevVotes = JSON.stringify(prev.map((p) => p.votes))
           const newVotes = JSON.stringify(nextParticipants.map((p) => p.votes))

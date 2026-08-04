@@ -300,6 +300,15 @@ export async function listParticipants(params?: ListParticipantsParams): Promise
   return apiFetch(`/participants${qs ? `?${qs}` : ''}`)
 }
 
+export async function listPublicParticipants(params?: ListParticipantsParams): Promise<{ items: ParticipantItem[]; pagination: any }> {
+  const searchParams = new URLSearchParams()
+  if (params?.search) searchParams.set('search', params.search)
+  if (params?.eventId) searchParams.set('eventId', params.eventId)
+  if (params?.category) searchParams.set('category', params.category)
+  const qs = searchParams.toString()
+  return apiFetch(`/participants/public${qs ? `?${qs}` : ''}`)
+}
+
 export async function createParticipant(payload: Record<string, unknown>): Promise<{ participant: ParticipantItem }> {
   return apiFetch('/participants', {
     method: 'POST',
@@ -475,7 +484,7 @@ export const paymentMethods: PaymentMethod[] = [
 export async function getPublicParticipants(
   page = 1,
   limit = 50,
-): Promise<{ participants: PublicParticipant[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> {
+): Promise<{ items: PublicParticipant[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> {
   return apiFetch(`/participants/public?page=${page}&limit=${limit}`)
 }
 
