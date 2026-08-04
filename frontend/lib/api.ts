@@ -237,18 +237,18 @@ export async function listPublicEvents(): Promise<{ events: EventItem[] }> {
   return apiFetch('/events')
 }
 
-export async function getEvent(id: string): Promise<{ event: EventItem }> {
+export async function getEvent(id: string): Promise<EventItem> {
   return apiFetch(`/events/${id}`)
 }
 
-export async function createEvent(payload: Record<string, unknown>): Promise<{ event: EventItem }> {
+export async function createEvent(payload: Record<string, unknown>): Promise<EventItem> {
   return apiFetch('/events', {
     method: 'POST',
     body: JSON.stringify(payload),
   })
 }
 
-export async function updateEvent(id: string, payload: Record<string, unknown>): Promise<{ event: EventItem }> {
+export async function updateEvent(id: string, payload: Record<string, unknown>): Promise<EventItem> {
   return apiFetch(`/events/${id}`, {
     method: 'PUT',
     body: JSON.stringify(payload),

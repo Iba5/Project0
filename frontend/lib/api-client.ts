@@ -13,6 +13,22 @@ const API_BASE_URL =
 
 const TOKEN_KEY = 'voting_admin_token'
 
+let warnedAboutBadBaseUrl = false
+function warnIfMisconfigured() {
+  if (warnedAboutBadBaseUrl) return
+  if (typeof window === 'undefined') return
+  const isLocalHost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+  const pointsAtLocalhost = API_BASE_URL.includes('localhost') || API_BASE_URL.includes('127.0.0.1')
+  if (!isLocalHost && pointsAtLocalhost) {
+    warnedAboutBadBaseUrl = true
+    console.error(
+      `[api-client] This site is running at ${window.location.hostname} but API_BASE_URL is ` +
+      `"${API_BASE_URL}". NEXT_PUBLIC_API_URL was not set (or not set correctly) when this ` +
+      `build was created. Every API call will fail until the env var is fixed and the app is rebuilt.`
+    )
+  }
+}
+
 /**
  * Get the stored JWT token from localStorage.
  * NOTE: This is being phased out in favor of cookie-based refresh tokens.
@@ -109,6 +125,7 @@ async function refreshAccessToken(): Promise<string | null> {
  * Automatically appends trailing slashes for collection endpoints that require them.
  */
 export function apiUrl(path: string): string {
+  warnIfMisconfigured()
   // Ensure the path starts with /
   let normalized = path.startsWith('/') ? path : `/${path}`
   
@@ -222,16 +239,18 @@ export async function apiFetch<T = unknown>(
         
         return retryData as T
       } else {
-        // Token refresh failed, throw error to let UI handle it
+        // Token refresh failed — the caller decides what happens next.
+        // A shared fetch wrapper should never unilaterally navigate the
+        // whole tab; that's a page-level decision (see admin/layout.tsx).
         isRefreshing = false
         clearRefreshSubscribers()
-        throw new Error('Authentication failed. Please login again.')
+        throw new Error('Session expired. Please sign in again.')
       }
     } catch (refreshError) {
       isRefreshing = false
       clearRefreshSubscribers()
-      // Throw error to let UI handle auth failure
-      throw new Error('Authentication failed. Please login again.')
+      // Do not redirect here either — same reasoning as above.
+      throw new Error('Session expired. Please sign in again.')
     }
   } else if (res.status === 401 && isRefreshing) {
     // If already refreshing, wait for the refresh to complete

@@ -466,7 +466,7 @@ export function AdminEventsView() {
         toast.success('Event created')
         
         // Generate filtered link for the new event
-        const eventLink = `${window.location.origin}?event=${result.event.id}`
+        const eventLink = `${window.location.origin}?event=${result.id}`
         navigator.clipboard.writeText(eventLink)
         toast.success('Event link copied to clipboard!', {
           description: eventLink
@@ -574,6 +574,26 @@ export function AdminEventsView() {
 
   return (
     <div className="space-y-6 p-4 sm:p-6">
+      {/* Header */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4 }}
+        className="flex items-center justify-between flex-wrap gap-4"
+      >
+        <div>
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Events</h1>
+          <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>Manage competitions and their schedules</p>
+        </div>
+        <Button
+          onClick={openCreate}
+          className="rounded-full gap-2 focus-ring-gold button-press fade-in-up"
+          style={{ background: 'linear-gradient(135deg, #F59E0B, #D97706)', color: 'var(--surface-3)' }}
+        >
+          <Plus className="w-4 h-4" /> Create Event
+        </Button>
+      </motion.div>
+
       {/* Status Quick Filter Pills */}
       <motion.div
         initial={{ opacity: 0, y: 8 }}

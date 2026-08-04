@@ -379,33 +379,6 @@ function AdminLoginViewContent() {
                   </div>
                 </div>
 
-                {!superAdminExists && (
-                  <div className="space-y-2">
-                    <Label htmlFor="bootstrap-token" style={{ color: 'var(--text-muted)' }}>
-                      Setup Token
-                    </Label>
-                    <div className="relative">
-                      <ShieldAlert className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: 'var(--text-muted)' }} />
-                      <Input
-                        id="bootstrap-token"
-                        type="text"
-                        placeholder="Enter setup token from backend"
-                        value={bootstrapToken}
-                        onChange={(e) => setBootstrapToken(e.target.value)}
-                        required={!superAdminExists}
-                        className="pl-10 rounded-xl border-none"
-                        style={{
-                          background: 'var(--surface-3)',
-                          color: 'var(--text-primary)',
-                        }}
-                      />
-                    </div>
-                    <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                      Required for first admin setup. Get this from your backend environment variables.
-                    </p>
-                  </div>
-                )}
-
                 <div className="space-y-2">
                   <Label htmlFor="signup-confirm" style={{ color: 'var(--text-muted)' }}>
                     Confirm Password
@@ -428,6 +401,33 @@ function AdminLoginViewContent() {
                     />
                   </div>
                 </div>
+
+                {!superAdminExists && (
+                  <div className="space-y-2">
+                    <Label htmlFor="signup-bootstrap" style={{ color: 'var(--text-muted)' }}>
+                      Setup Token
+                    </Label>
+                    <div className="relative">
+                      <ShieldAlert className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: 'var(--text-muted)' }} />
+                      <Input
+                        id="signup-bootstrap"
+                        type="text"
+                        placeholder="One-time setup token"
+                        value={bootstrapToken}
+                        onChange={(e) => setBootstrapToken(e.target.value)}
+                        required
+                        className="pl-10 rounded-xl border-none"
+                        style={{
+                          background: 'var(--surface-3)',
+                          color: 'var(--text-primary)',
+                        }}
+                      />
+                    </div>
+                    <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                      Required only for this first account. This is the BOOTSTRAP_TOKEN value set on the server — not your password.
+                    </p>
+                  </div>
+                )}
 
                 <Button
                   type="submit"
