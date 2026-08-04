@@ -11,22 +11,10 @@ from app.repositories.repositories import UserRepository
 
 router = APIRouter()
 
-# M3 FIX: Use PermissionChecker instead of manual role check
 allow_manage_admins = Depends(PermissionChecker(Permission.ADMINS_MANAGE))
 
-@router.get(
-    "",
-    summary="List All Admins",
-    description="Get list of all admin users. Requires admins.manage permission.",
-    dependencies=[allow_manage_admins]
-)
-@router.get(
-    "/list",
-    summary="List All Admins (alias)",
-    description="Get list of all admin users.",
-    dependencies=[allow_manage_admins]
-)
-def list_admins(db: Session = Depends(get_db)):
+# Helper logic to avoid code duplication
+def fetch_and_format_admins(db: Session):
     user_repo = UserRepository(db)
     admins = user_repo.get_all_active_admins()
 
@@ -39,8 +27,27 @@ def list_admins(db: Session = Depends(get_db)):
         )
         for admin in admins
     ]
-    # Return format matching frontend expectation
     return {"admins": [a.model_dump(by_alias=True) for a in admin_list]}
+
+
+@router.get(
+    "",
+    summary="List All Admins",
+    description="Get list of all admin users. Requires admins.manage permission.",
+    dependencies=[allow_manage_admins]
+)
+def list_admins(db: Session = Depends(get_db)):
+    return fetch_and_format_admins(db)
+
+
+@router.get(
+    "/list",
+    summary="List All Admins (alias)",
+    description="Get list of all admin users.",
+    dependencies=[allow_manage_admins]
+)
+def list_admins_alias(db: Session = Depends(get_db)):
+    return fetch_and_format_admins(db)
 
 
 @router.post(
@@ -48,23 +55,36 @@ def list_admins(db: Session = Depends(get_db)):
     summary="Invite a new admin",
     dependencies=[allow_manage_admins]
 )
+def invite_admin(
+    payload: dict,
+    db: Session = Depends(get_db)
+):
+    return process_admin_invitation(payload, db)
+
+
 @router.post(
     "/",
     summary="Invite a new admin (alias)",
     dependencies=[allow_manage_admins]
 )
-def invite_admin(
+def invite_admin_alias(
     payload: dict,
     db: Session = Depends(get_db)
 ):
+    return process_admin_invitation(payload, db)
+
+
+# Helper logic for invitation to avoid code duplication
+def process_admin_invitation(payload: dict, db: Session):
     from app.services.services import AuthService
     from app.schemas.schemas import AdminInvitationRequest
     from app.enums.enums import UserRole
+    
     auth_service = AuthService(db)
     role_val = UserRole(payload.get("role", "admin"))
     req = AdminInvitationRequest(email=payload["email"], role=role_val)
-    # We pass a dummy system admin context if current user isn't directly passed
     inv = auth_service.create_admin_invitation(req, current_user=None)
+    
     return {
         "admin": {
             "id": inv.email,
