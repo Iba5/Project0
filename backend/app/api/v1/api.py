@@ -153,7 +153,8 @@ def list_audit_logs(
         }
         for log in logs
     ]
-    return {"items": items, "total": len(items)}
+    # Return format matching frontend expectation
+    return {"logs": items, "total": len(items)}
 
 
 @api_router.post("/upload", tags=["upload"])
