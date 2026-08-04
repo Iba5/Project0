@@ -154,8 +154,9 @@ export async function apiFetch<T = unknown>(
 ): Promise<T> {
   const headers = new Headers(options?.headers || {})
   
-  // Add JSON content type if not present
-  if (!headers.has('Content-Type')) {
+  // Add JSON content type only for methods that have a body
+  const method = options?.method || 'GET'
+  if (method !== 'GET' && method !== 'HEAD' && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
   
@@ -193,7 +194,8 @@ export async function apiFetch<T = unknown>(
         
         // Retry the original request with the new token
         const retryHeaders = new Headers(options?.headers || {})
-        if (!retryHeaders.has('Content-Type')) {
+        const retryMethod = options?.method || 'GET'
+        if (retryMethod !== 'GET' && retryMethod !== 'HEAD' && !retryHeaders.has('Content-Type')) {
           retryHeaders.set('Content-Type', 'application/json')
         }
         retryHeaders.set('Authorization', `Bearer ${newToken}`)
@@ -242,7 +244,8 @@ export async function apiFetch<T = unknown>(
     return new Promise((resolve, reject) => {
       subscribeTokenRefresh((token: string) => {
         const retryHeaders = new Headers(options?.headers || {})
-        if (!retryHeaders.has('Content-Type')) {
+        const retryMethod = options?.method || 'GET'
+        if (retryMethod !== 'GET' && retryMethod !== 'HEAD' && !retryHeaders.has('Content-Type')) {
           retryHeaders.set('Content-Type', 'application/json')
         }
         retryHeaders.set('Authorization', `Bearer ${token}`)
