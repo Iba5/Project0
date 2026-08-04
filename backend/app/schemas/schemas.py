@@ -157,6 +157,8 @@ class EventBase(CamelModel):
     voting_closes: Optional[datetime] = None
     public_leaderboard: bool = True
     require_contestant_approval: bool = True
+    enable_videos: bool = False  # Enable participant videos for this event
+    share_link: Optional[str] = None  # Internal shareable link
 
 class EventCreate(EventBase):
     competition_id: Optional[str] = None
@@ -177,14 +179,15 @@ class EventUpdate(CamelModel):
     voting_opens: Optional[datetime] = None
     voting_closes: Optional[datetime] = None
     public_leaderboard: Optional[bool] = None
-    allowed_platforms: Optional[str] = None
-    allowed_categories: Optional[str] = None
     require_contestant_approval: Optional[bool] = None
+    enable_videos: Optional[bool] = None
+    share_link: Optional[str] = None
     competition_id: Optional[str] = None
 
 class EventResponse(EventBase):
     id: str
     competition_id: Optional[str] = None
+    computed_status: Optional[str] = None  # Computed runtime status
 
 # --- Participant / Contestant Schemas ---
 
@@ -192,7 +195,9 @@ class ParticipantBase(CamelModel):
     name: str
     category: str
     platform: SocialPlatform
-    video_url: str
+    video_url: Optional[str] = None  # Optional promotional video
+    image_url: Optional[str] = None  # Profile picture
+    bio: Optional[str] = None  # Biography
     status: ContestantStatus = ContestantStatus.DRAFT
     votes: int = 0
 

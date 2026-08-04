@@ -1,0 +1,103 @@
+"""
+Public endpoints for event and participant access.
+These endpoints allow public access to published events and participants.
+"""
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import Optional
+
+from app.core.database import get_db
+from app.services.services import EventService, ParticipantService
+from app.schemas.schemas import EventResponse, ParticipantResponse
+from app.enums.enums import EventStatus
+from app.utils.event_utils import get_computed_event_status
+
+router = APIRouter()
+
+
+@router.get(
+    "/events/{event_id}",
+    response_model=EventResponse,
+    summary="Get public event by ID",
+    description="Access a published event using its shareable link or ID"
+)
+def get_public_event(event_id: str, db: Session = Depends(get_db)):
+    """Get a public event by its ID. Only published events are accessible."""
+    event_service = EventService(db)
+    event = event_service.get_event(event_id)
+    
+    # Only allow access to published events
+    if event.status != EventStatus.PUBLISHED:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Event not found or not published"
+        )
+    
+    # Add computed status
+    event.computed_status = get_computed_event_status(
+        event.status,
+        event.start_date,
+        event.end_date,
+        event.registration_opens,
+        event.registration_closes,
+        event.voting_opens,
+        event.voting_closes,
+    )
+    
+    return event
+
+
+@router.get(
+    "/events/{event_id}/participants",
+    summary="List public participants for an event",
+    description="Get all approved participants for a published event"
+)
+def list_public_event_participants(
+    event_id: str,
+    db: Session = Depends(get_db)
+):
+    """Get all approved participants for a specific event."""
+    event_service = EventService(db)
+    event = event_service.get_event(event_id)
+    
+    # Only allow access to published events
+    if event.status != EventStatus.PUBLISHED:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Event not found or not published"
+        )
+    
+    participant_service = ParticipantService(db)
+    # Get participants filtered by event_id
+    from app.repositories.repositories import ParticipantRepository
+    part_repo = ParticipantRepository(db)
+    participants = part_repo.get_by_event_id(event_id)
+    
+    # Only return approved participants
+    from app.enums.enums import ContestantStatus
+    approved_participants = [p for p in participants if p.status == ContestantStatus.APPROVED]
+    
+    return {"participants": approved_participants}
+
+
+@router.get(
+    "/participants/{participant_id}",
+    response_model=ParticipantResponse,
+    summary="Get public participant by ID",
+    description="Access a participant's public profile"
+)
+def get_public_participant(participant_id: str, db: Session = Depends(get_db)):
+    """Get a public participant profile."""
+    participant_service = ParticipantService(db)
+    participant = participant_service.get_participant(participant_id)
+    
+    # Only allow access to approved participants
+    from app.enums.enums import ContestantStatus
+    if participant.status != ContestantStatus.APPROVED:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Participant not found or not approved"
+        )
+    
+    return participant

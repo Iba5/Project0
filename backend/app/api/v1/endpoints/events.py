@@ -9,6 +9,7 @@ from app.services.services import EventService
 from app.schemas.schemas import EventCreate, EventUpdate, EventResponse
 from app.repositories.repositories import paginate_response
 from app.models.models import User
+from app.utils.event_utils import get_computed_event_status
 
 router = APIRouter()
 
@@ -25,6 +26,19 @@ allow_delete = Depends(PermissionChecker(Permission.EVENTS_DELETE))
 def list_events(pagination: PaginationParams = Depends(), db: Session = Depends(get_db)):
     event_service = EventService(db)
     items, total = event_service.list_events(pagination.offset, pagination.limit)
+    
+    # Add computed status to each event
+    for event in items:
+        event.computed_status = get_computed_event_status(
+            event.status,
+            event.start_date,
+            event.end_date,
+            event.registration_opens,
+            event.registration_closes,
+            event.voting_opens,
+            event.voting_closes,
+        )
+    
     return paginate_response(items, total, pagination.page, pagination.page_size)
 
 @router.get(
@@ -35,7 +49,20 @@ def list_events(pagination: PaginationParams = Depends(), db: Session = Depends(
 )
 def get_event(event_id: str, db: Session = Depends(get_db)):
     event_service = EventService(db)
-    return event_service.get_event(event_id)
+    event = event_service.get_event(event_id)
+    
+    # Add computed status
+    event.computed_status = get_computed_event_status(
+        event.status,
+        event.start_date,
+        event.end_date,
+        event.registration_opens,
+        event.registration_closes,
+        event.voting_opens,
+        event.voting_closes,
+    )
+    
+    return event
 
 @router.post(
     "/",
@@ -64,6 +91,20 @@ def update_event(
 ):
     event_service = EventService(db, user_id=current_user.id)
     return event_service.update_event(event_id, event_in)
+
+@router.post(
+    "/{event_id}/publish",
+    response_model=EventResponse,
+    summary="Publish an event",
+    description="Publish a Draft event, making it visible to the public and generating a share link"
+)
+def publish_event(
+    event_id: str,
+    current_user: User = allow_update,
+    db: Session = Depends(get_db)
+):
+    event_service = EventService(db, user_id=current_user.id)
+    return event_service.publish_event(event_id)
 
 @router.delete(
     "/{event_id}",

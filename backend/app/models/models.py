@@ -109,10 +109,16 @@ class Event(Base):
     voting_closes: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     public_leaderboard: Mapped[bool] = mapped_column(Boolean, default=True)
     require_contestant_approval: Mapped[bool] = mapped_column(Boolean, default=True)
+    enable_videos: Mapped[bool] = mapped_column(Boolean, default=False)  # Enable participant videos for this event
+    share_link: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # Internal shareable link
+    event_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # Unique event ID for public links
 
     # Foreign key to Competition (nullable for backward compatibility)
     competition_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("competitions.id"), nullable=True, index=True)
     competition: Mapped[Optional["Competition"]] = relationship("Competition", back_populates="events")
+    
+    # Relationship to participants
+    participants: Mapped[List["Participant"]] = relationship("Participant", back_populates="event")
 
 
 class Participant(Base):
@@ -126,15 +132,22 @@ class Participant(Base):
     name: Mapped[str] = mapped_column(String, nullable=False, index=True)  # Index for search
     category: Mapped[str] = mapped_column(String, nullable=False, index=True)  # Index for filtering
     platform: Mapped[SocialPlatform] = mapped_column(Enum(SocialPlatform), nullable=False, index=True)  # Index for platform filtering
-    video_url: Mapped[str] = mapped_column(String, nullable=False)
+    video_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # Optional promotional video
+    image_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # Profile picture
+    bio: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Biography
     status: Mapped[ContestantStatus] = mapped_column(Enum(ContestantStatus), default=ContestantStatus.DRAFT, nullable=False, index=True)  # Index for status filtering
     votes: Mapped[int] = mapped_column(Integer, default=0, index=True)  # Index for leaderboard sorting
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)  # Index for date queries
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)  # Soft delete field
+    event_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)  # Associated event for public pages
 
     # Foreign key to Competition (nullable for backward compatibility)
     competition_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("competitions.id"), nullable=True, index=True)
     competition: Mapped[Optional["Competition"]] = relationship("Competition", back_populates="participants")
+    
+    # Foreign key to Event (for public participant pages)
+    event_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("events.id"), nullable=True, index=True)
+    event: Mapped[Optional["Event"]] = relationship("Event", back_populates="participants")
 
     payments: Mapped[List["Payment"]] = relationship("Payment", back_populates="contestant")
     vote_transactions: Mapped[List["VoteTransaction"]] = relationship("VoteTransaction", back_populates="contestant")

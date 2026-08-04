@@ -664,6 +664,19 @@ class EventService:
         return event
 
     def create_event(self, event_in: EventCreate) -> Event:
+        # Validate event timeline
+        from app.utils.event_utils import validate_event_timeline
+        validation_errors = validate_event_timeline(
+            event_in.start_date,
+            event_in.end_date,
+            event_in.registration_opens,
+            event_in.registration_closes,
+            event_in.voting_opens,
+            event_in.voting_closes,
+        )
+        if validation_errors:
+            raise ValidationException("Invalid event timeline: " + "; ".join(validation_errors))
+        
         new_event = Event(
             name=event_in.name,
             description=event_in.description,
@@ -680,6 +693,7 @@ class EventService:
             voting_closes=event_in.voting_closes,
             public_leaderboard=event_in.public_leaderboard,
             require_contestant_approval=event_in.require_contestant_approval,
+            enable_videos=event_in.enable_videos,
             competition_id=event_in.competition_id,
         )
         saved = self.event_repo.create(new_event)
@@ -709,6 +723,21 @@ class EventService:
         if not event:
             raise NotFoundException("Event not found")
 
+        # Validate event timeline if dates are being updated
+        from app.utils.event_utils import validate_event_timeline
+        date_fields = ['start_date', 'end_date', 'registration_opens', 'registration_closes', 'voting_opens', 'voting_closes']
+        if any(field in event_in.model_dump(exclude_unset=True) for field in date_fields):
+            validation_errors = validate_event_timeline(
+                event_in.start_date or event.start_date,
+                event_in.end_date or event.end_date,
+                event_in.registration_opens or event.registration_opens,
+                event_in.registration_closes or event.registration_closes,
+                event_in.voting_opens or event.voting_opens,
+                event_in.voting_closes or event.voting_closes,
+            )
+            if validation_errors:
+                raise ValidationException("Invalid event timeline: " + "; ".join(validation_errors))
+
         # L9 FIX: Only update fields that were actually provided (partial update)
         update_data = event_in.model_dump(exclude_unset=True)
         for field, value in update_data.items():
@@ -725,6 +754,52 @@ class EventService:
         
         # Invalidate cache after event update
         self._invalidate_event_cache_async()
+        
+        return event
+
+    def publish_event(self, event_id: str) -> Event:
+        """Publish an event, making it visible to the public."""
+        event = self.event_repo.get_by_id(event_id)
+        if not event:
+            raise NotFoundException("Event not found")
+        
+        if event.status != EventStatus.DRAFT:
+            raise ValidationException("Only Draft events can be published")
+        
+        # Validate timeline before publishing
+        from app.utils.event_utils import validate_event_timeline
+        validation_errors = validate_event_timeline(
+            event.start_date,
+            event.end_date,
+            event.registration_opens,
+            event.registration_closes,
+            event.voting_opens,
+            event.voting_closes,
+        )
+        if validation_errors:
+            raise ValidationException("Cannot publish event with invalid timeline: " + "; ".join(validation_errors))
+        
+        # Generate share link
+        from app.core.config import settings
+        share_link = f"{settings.FRONTEND_URL}/events/{event.id}"
+        
+        event.status = EventStatus.PUBLISHED
+        event.share_link = share_link
+        self.event_repo.update()
+        
+        AuditService.log_action(
+            db=self.db,
+            action="Event Published",
+            user_id=self.user_id,
+            details=f"Published event: {event.name} ({event.id}) - Share link: {share_link}"
+        )
+        
+        # Invalidate cache
+        try:
+            cache_service = get_cache_service()
+            cache_service.invalidate_events()
+        except Exception as e:
+            logger.error(f"Failed to invalidate events cache: {e}")
         
         return event
 
@@ -833,6 +908,8 @@ class ParticipantService:
             category=part_in.category,
             platform=part_in.platform,
             video_url=part_in.video_url,
+            image_url=part_in.image_url,
+            bio=part_in.bio,
             status=part_in.status,
             votes=part_in.votes,
             competition_id=part_in.competition_id,
@@ -1050,21 +1127,40 @@ class PaymentService:
         """
         INITIATE PAYMENT (Enhanced):
         1. Validates contestant exists
-        2. Checks voter duplication (phone + competition)
-        3. If duplicate, requires acknowledge_duplicate=True
-        4. Rate limits by phone
-        5. Checks idempotency to prevent duplicate payments
-        6. In TEST MODE: Creates test payment without calling Paynow
-        7. In PRODUCTION: Uses official Paynow SDK to create payment
-        8. Saves poll_url to DB (MANDATORY per Paynow docs)
-        9. Returns redirect URL (web) or instructions (mobile)
+        2. Validates event status and payment eligibility
+        3. Checks voter duplication (phone + competition)
+        4. If duplicate, requires acknowledge_duplicate=True
+        5. Rate limits by phone
+        6. Checks idempotency to prevent duplicate payments
+        7. In TEST MODE: Creates test payment without calling Paynow
+        8. In PRODUCTION: Uses official Paynow SDK to create payment
+        9. Saves poll_url to DB (MANDATORY per Paynow docs)
+        10. Returns redirect URL (web) or instructions (mobile)
         """
         # 1. Validate contestant
         part = self.part_repo.get_by_id(payment_in.contestant_id)
         if not part:
             raise NotFoundException("Contestant not found")
 
-        # 1b. Validate voting window via competition time constraints (H6 fix)
+        # 1b. Validate event-aware payment eligibility
+        if part.event_id:
+            from app.repositories.repositories import EventRepository
+            event_repo = EventRepository(self.db)
+            event = event_repo.get_by_id(part.event_id)
+            if event:
+                from app.utils.payment_utils import validate_payment_eligibility
+                validate_payment_eligibility(
+                    event.status,
+                    event.start_date,
+                    event.end_date,
+                    event.registration_opens,
+                    event.registration_closes,
+                    event.voting_opens,
+                    event.voting_closes,
+                    part.status,
+                )
+
+        # 1c. Validate voting window via competition time constraints (H6 fix)
         if part.competition_id:
             comp = self.comp_repo.get_by_id(part.competition_id)
             if comp and (comp.start_date or comp.end_date):
@@ -1077,7 +1173,7 @@ class PaymentService:
                 if end and now > end:
                     raise PaymentException("Voting has closed for this competition.")
 
-        # 1c. Validate payment method is enabled
+        # 1d. Validate payment method is enabled
         from app.repositories.repositories import PaymentMethodConfigRepository
         payment_method_repo = PaymentMethodConfigRepository(self.db)
         payment_method_config = payment_method_repo.get_by_method(payment_in.payment_method.lower())
@@ -1100,10 +1196,10 @@ class PaymentService:
                 "instructions": None
             }
 
-        # 3. Rate limiting
+        # 4. Rate limiting
         self._rate_limit_check(payment_in.voter_phone)
 
-        # 3b. Idempotency dedupe: if client supplied a key and we already
+        # 5. Idempotency dedupe: if client supplied a key and we already
         # have a payment with that key, return existing details instead
         if idempotency_key:
             existing = self.payment_repo.get_by_idempotency_key(idempotency_key)
@@ -1118,10 +1214,10 @@ class PaymentService:
                     "pollUrl": existing.poll_url,
                 }
 
-        # 4. Generate reference
+        # 6. Generate reference
         reference = f"VOTE-{uuid.uuid4().hex[:8].upper()}"
 
-        # 5. Resolve competition_id and vote price with fallback chain
+        # 7. Resolve competition_id and vote price with fallback chain
         comp_id = payment_in.competition_id
         vote_price = None
         
@@ -1146,13 +1242,13 @@ class PaymentService:
             vote_price = settings.MIN_PAYMENT_AMOUNT
             logger.info(f"Adjusted vote_price to minimum ${vote_price} for contestant {part.id}")
 
-        # 6. TEST MODE: Create test payment without Paynow
+        # 8. TEST MODE: Create test payment without Paynow
         if self.test_mode:
             return self._initiate_test_payment(
                 payment_in, part, reference, vote_price, comp_id, idempotency_key
             )
 
-        # 7. PRODUCTION MODE: Continue with real Paynow flow
+        # 9. PRODUCTION MODE: Continue with real Paynow flow
         return self._initiate_real_payment(
             payment_in, part, reference, vote_price, comp_id, idempotency_key
         )
@@ -1221,10 +1317,10 @@ class PaymentService:
         Create a real payment using Paynow SDK.
         Used in production mode for actual payment processing.
         """
-        # Determine payment type (web vs mobile)
+        # 10. Determine payment type (web vs mobile)
         is_mobile = payment_in.payment_method.lower() in ("ecocash", "onemoney")
 
-        # Create local payment record with SERVER-DETERMINED amount
+        # 11. Create local payment record with SERVER-DETERMINED amount
         pending_payment = Payment(
             reference=reference,
             contestant_id=part.id,
@@ -1242,7 +1338,7 @@ class PaymentService:
             pending_payment.idempotency_key = idempotency_key
         # Don't commit yet — we'll commit after Paynow confirms creation
 
-        # Call Paynow SDK with SERVER-DETERMINED amount
+        # 12. Call Paynow SDK with SERVER-DETERMINED amount
         item_name = f"Vote for {part.name}"
         voter_email = payment_in.voter_email or "voter@platform.com"
 
@@ -1283,14 +1379,14 @@ class PaymentService:
             )
             raise PaymentException(f"Payment could not be initiated: {error_msg}")
 
-        # Save poll_url and redirect URL to payment record
+        # 13. Save poll_url and redirect URL to payment record
         pending_payment.poll_url = paynow_response.get("poll_url")
         pending_payment.paynow_redirect_url = paynow_response.get("redirect_url")
         pending_payment.status = PaymentStatus.PENDING
 
         self.payment_repo.create(pending_payment)
 
-        # Log payment initiation
+        # 14. Log payment initiation
         AuditService.log_action(
             db=self.db,
             action="Payment Created",

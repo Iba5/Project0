@@ -151,6 +151,13 @@ class ParticipantRepository(BaseRepository[Participant]):
             query = query.filter(Participant.deleted_at.is_(None))
         return query.all()
 
+    def get_by_event_id(self, event_id: str) -> List[Participant]:
+        """Get all participants for a specific event."""
+        query = self.db.query(Participant).filter(Participant.event_id == event_id)
+        if hasattr(Participant, "deleted_at"):
+            query = query.filter(Participant.deleted_at.is_(None))
+        return query.all()
+
     def _filtered_query(
     self,
     search: str | None = None,

@@ -84,6 +84,11 @@ class Settings(BaseSettings):
     ALLOWED_IMAGE_TYPES: list = ["image/jpeg", "image/png", "image/webp", "image/gif"]
     MAX_IMAGE_DIMENSION: int = int(os.getenv("MAX_IMAGE_DIMENSION", "4096"))  # 4K max dimension
 
+    # Video Configuration
+    MAX_VIDEO_SIZE: int = int(os.getenv("MAX_VIDEO_SIZE", "104857600"))  # 100MB default
+    ALLOWED_VIDEO_FORMATS: list = ["mp4", "webm", "mov", "avi"]
+    MAX_VIDEO_DURATION: int = int(os.getenv("MAX_VIDEO_DURATION", "300"))  # 5 minutes in seconds
+
     # Cloudflare R2 Storage Configuration
     R2_ACCOUNT_ID: str = os.getenv("R2_ACCOUNT_ID", "")
     R2_ACCESS_KEY_ID: str = os.getenv("R2_ACCESS_KEY_ID", "")
@@ -96,6 +101,12 @@ class Settings(BaseSettings):
 
     # Cheat Mode Configuration
     CHEAT_MODE_ENABLED: bool = os.getenv("CHEAT_MODE_ENABLED", "false").lower() in ("true", "1", "yes")
+
+    # Rate Limiting Configuration
+    RATE_LIMIT_REQUESTS: int = int(os.getenv("RATE_LIMIT_REQUESTS", "100"))  # Requests per window
+    RATE_LIMIT_WINDOW: int = int(os.getenv("RATE_LIMIT_WINDOW", "60"))  # Seconds
+    VIDEO_RATE_LIMIT_REQUESTS: int = int(os.getenv("VIDEO_RATE_LIMIT_REQUESTS", "10"))  # Video requests per window
+    VIDEO_RATE_LIMIT_WINDOW: int = int(os.getenv("VIDEO_RATE_LIMIT_WINDOW", "60"))  # Seconds
 
     def validate_secrets(self) -> None:
         """

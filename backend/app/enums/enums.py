@@ -17,12 +17,10 @@ class Permission(str, Enum):
     ADMINS_MANAGE = "admins.manage"  # M3 FIX: Dedicated permission for admin management
 
 class EventStatus(str, Enum):
+    # Administrative states (manual control)
     DRAFT = "Draft"
-    UPCOMING = "Upcoming"
-    REGISTRATION_OPEN = "Registration Open"
-    VOTING_OPEN = "Voting Open"
-    VOTING_CLOSED = "Voting Closed"
-    COMPLETED = "Completed"
+    PUBLISHED = "Published"
+    CANCELLED = "Cancelled"
     ARCHIVED = "Archived"
 
 class ContestantStatus(str, Enum):

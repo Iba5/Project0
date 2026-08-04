@@ -7,7 +7,7 @@ import logging
 
 from app.core.database import get_db
 from app.core.config import settings
-from app.api.v1.endpoints import auth, dashboard, events, participants, payments, social, admins, competitions, payment_methods
+from app.api.v1.endpoints import auth, dashboard, events, participants, payments, social, admins, competitions, payment_methods, public
 from app.api.v1.endpoints import settings as settings_router
 from app.repositories.repositories import ParticipantRepository, EventRepository, PaymentRepository, AuditLogRepository
 from app.api.v1.dependencies import PermissionChecker, get_current_active_user
@@ -28,6 +28,7 @@ api_router.include_router(settings_router.router, prefix="/settings", tags=["set
 api_router.include_router(social.router, prefix="/social-router", tags=["social-router"])
 api_router.include_router(admins.router, prefix="/admins", tags=["admins"])
 api_router.include_router(payment_methods.router, prefix="/payment-methods", tags=["payment-methods"])
+api_router.include_router(public.router, prefix="/public", tags=["public"])
 
 
 @api_router.get("/stats", tags=["public"])
@@ -162,47 +163,46 @@ def list_audit_logs(
 async def upload_file(
     image: Optional[UploadFile] = File(None), 
     fileName: Optional[str] = Form(None),
+    upload_type: Optional[str] = Form("image"),  # "image" or "video"
     current_user: User = Depends(get_current_active_user)
 ):
     """
-    Upload image file with authentication and validation.
+    Upload file with authentication and validation.
     Requires admin authentication.
     Uses Cloudflare R2 storage if configured, otherwise falls back to local storage.
+    Supports both image and video uploads with appropriate validation.
     """
     if not image:
         return {"url": "/placeholder-contestant.jpg", "fileName": fileName or "placeholder.jpg"}
     
-    # Validate file type
-    if image.content_type not in settings.ALLOWED_IMAGE_TYPES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid file type. Allowed types: {', '.join(settings.ALLOWED_IMAGE_TYPES)}"
-        )
-    
-    # Validate file size
     content = await image.read()
-    if len(content) > settings.MAX_UPLOAD_SIZE:
-        raise HTTPException(
-            status_code=400,
-            detail=f"File too large. Maximum size: {settings.MAX_UPLOAD_SIZE / (1024*1024):.1f}MB"
-        )
+    
+    # Validate based on upload type
+    if upload_type == "video":
+        from app.utils.storage_utils import validate_video_upload
+        validate_video_upload(len(content), image.content_type, image.filename)
+    else:
+        # Default to image validation
+        from app.utils.storage_utils import validate_image_upload
+        validate_image_upload(len(content), image.content_type, image.filename)
     
     # Validate image dimensions if it's an image
-    try:
-        from PIL import Image
-        from io import BytesIO
-        
-        img = Image.open(BytesIO(content))
-        width, height = img.size
-        
-        if max(width, height) > settings.MAX_IMAGE_DIMENSION:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Image dimensions too large. Maximum: {settings.MAX_IMAGE_DIMENSION}px"
-            )
-    except Exception as e:
-        # If image validation fails, we still allow the upload but log it
-        logger.warning(f"Image validation failed: {e}")
+    if upload_type != "video":
+        try:
+            from PIL import Image
+            from io import BytesIO
+            
+            img = Image.open(BytesIO(content))
+            width, height = img.size
+            
+            if max(width, height) > settings.MAX_IMAGE_DIMENSION:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Image dimensions too large. Maximum: {settings.MAX_IMAGE_DIMENSION}px"
+                )
+        except Exception as e:
+            # If image validation fails, we still allow the upload but log it
+            logger.warning(f"Image validation failed: {e}")
     
     # Try R2 storage first if configured
     if all([settings.R2_ACCOUNT_ID, settings.R2_ACCESS_KEY_ID, settings.R2_SECRET_ACCESS_KEY, settings.R2_BUCKET_NAME]):
@@ -215,14 +215,15 @@ async def upload_file(
                 file_extension = "." + image.filename.split(".")[-1].lower()
             
             # Upload to R2
+            folder = "videos" if upload_type == "video" else "uploads"
             public_url, file_key = r2_storage.upload_image(
                 file_content=content,
                 content_type=image.content_type,
                 file_extension=file_extension,
-                folder="uploads"
+                folder=folder
             )
             
-            logger.info(f"Image uploaded to R2: {file_key}")
+            logger.info(f"File uploaded to R2: {file_key}")
             return {"url": public_url, "fileName": image.filename or file_key}
             
         except Exception as e:
