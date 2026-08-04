@@ -158,3 +158,34 @@ CACHE_KEYS = {
     'participant_details': 'participant',
     'event_details': 'event',
 }
+
+# Cache TTL constants (in seconds)
+CACHE_TTL = {
+    'SHORT': 60,           # 1 minute
+    'MEDIUM': 300,         # 5 minutes
+    'LONG': 3600,          # 1 hour
+    'DAILY': 86400,        # 24 hours
+}
+
+# Cache key prefixes
+CACHE_PREFIXES = {
+    'leaderboard': 'leaderboard',
+    'participants': 'participants',
+    'events': 'events',
+    'stats': 'stats',
+    'payment_methods': 'payment_methods',
+}
+
+
+def get_cache_service() -> CacheService:
+    """Get the global cache service instance."""
+    return cache
+
+
+def get_cache_key(prefix: str, *args) -> str:
+    """Generate a cache key from prefix and arguments."""
+    key = f"{prefix}"
+    if args:
+        key_suffix = ":".join(str(arg) for arg in args)
+        key = f"{key}:{key_suffix}"
+    return key
