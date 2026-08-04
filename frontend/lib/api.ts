@@ -214,7 +214,6 @@ export interface EventItem {
   enableVideos: boolean
   shareLink: string | null
   eventId: string | null
-  competitionId: string | null
   createdAt: string
   deletedAt: string | null
   participantCount?: number
@@ -241,7 +240,7 @@ export async function getEvent(id: string): Promise<EventItem> {
   return apiFetch(`/events/${id}`)
 }
 
-export async function createEvent(payload: Record<string, unknown>): Promise<EventItem> {
+export async function createEvent(payload: Record<string, unknown>): Promise<{ id: string; event: EventItem }> {
   return apiFetch('/events', {
     method: 'POST',
     body: JSON.stringify(payload),

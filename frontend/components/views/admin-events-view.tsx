@@ -466,8 +466,8 @@ export function AdminEventsView() {
         const result = await createEvent(payload)
         toast.success('Event created')
         
-        // Generate filtered link for the new event
-        const eventLink = `${window.location.origin}?event=${result.id}`
+        // Generate event link for the new event
+        const eventLink = `${window.location.origin}/events/${result.id}`
         navigator.clipboard.writeText(eventLink)
         toast.success('Event link copied to clipboard!', {
           description: eventLink

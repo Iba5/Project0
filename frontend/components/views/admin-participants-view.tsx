@@ -581,8 +581,9 @@ export function AdminParticipantsView() {
       const result = await createParticipant(values)
       toast.success('Participant created')
       
-      // Generate filtered link for the new contestant
-      const contestantLink = `${window.location.origin}/contestants?participant=${result.participant.id}`
+      // Generate event-specific link for the new contestant
+      const event = events.find(e => e.id === values.eventId)
+      const contestantLink = `${window.location.origin}/contestants/${result.participant.id}`
       navigator.clipboard.writeText(contestantLink)
       toast.success('Contestant link copied to clipboard!', {
         description: contestantLink
@@ -602,7 +603,7 @@ export function AdminParticipantsView() {
     if (!editingParticipant) return
     setSubmitting(true)
     try {
-      await updateParticipant(editingParticipant.id, values)
+      const result = await updateParticipant(editingParticipant.id, values)
       toast.success('Participant updated')
       setEditOpen(false)
       setEditingParticipant(null)
@@ -621,7 +622,7 @@ export function AdminParticipantsView() {
       category: p.category,
       videoUrl: p.videoUrl,
       bio: p.bio || '',
-      status: p.status,
+      eventId: p.eventId || '',
       imageUrl: p.imageUrl || '',
     })
     setEditOpen(true)

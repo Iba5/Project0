@@ -170,7 +170,7 @@ class ParticipantCreate(ParticipantBase):
 
 class ParticipantResponse(ParticipantBase):
     id: str
-    competition_id: Optional[str] = None
+    event_id: Optional[str] = None
 
 # --- Payment Schemas ---
 

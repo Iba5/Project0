@@ -93,7 +93,6 @@ def get_event(event_id: str, db: Session = Depends(get_db)):
 
 @router.post(
     "/",
-    response_model=EventResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a new event",
     dependencies=[allow_create]
@@ -104,7 +103,8 @@ def create_event(
     db: Session = Depends(get_db)
 ):
     event_service = EventService(db, user_id=current_user.id)
-    return event_service.create_event(event_in)
+    created = event_service.create_event(event_in)
+    return {"id": created.id, "event": created}
 
 @router.put(
     "/{event_id}",

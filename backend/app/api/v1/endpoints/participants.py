@@ -159,7 +159,6 @@ def get_participant_vote_history(
 
 @router.post(
     "/",
-    response_model=ParticipantResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a new contestant"
 )
@@ -169,7 +168,8 @@ def create_participant(
     db: Session = Depends(get_db)
 ):
     part_service = ParticipantService(db, user_id=current_user.id)
-    return part_service.create_participant(part_in)
+    created = part_service.create_participant(part_in)
+    return {"participant": created}
 
 
 @router.patch(
