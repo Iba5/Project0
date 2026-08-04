@@ -382,7 +382,10 @@ export default function AdminPaymentMethodsView() {
             </div>
             <div>
               <Label htmlFor="methodType">Method Type</Label>
-              <Select onValueChange={(value) => register('methodType').onChange({ target: { value } })}>
+              <Select
+                value={watch('methodType')}
+                onValueChange={(value) => setValue('methodType', value)}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select type" />
                 </SelectTrigger>
@@ -431,7 +434,10 @@ export default function AdminPaymentMethodsView() {
             </div>
             <div>
               <Label htmlFor="iconName">Icon</Label>
-              <Select onValueChange={(value) => register('iconName').onChange({ target: { value } })}>
+              <Select
+                value={watch('iconName')}
+                onValueChange={(value) => setValue('iconName', value)}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select icon" />
                 </SelectTrigger>
