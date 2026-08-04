@@ -74,7 +74,7 @@ export function EventFilterBar() {
   useEffect(() => {
     let cancelled = false
     listPublicEvents()
-      .then(({ events: fetched }) => {
+      .then(({ items: fetched }) => {
         if (cancelled) return
         const visible = (fetched || [])
           .filter((e) => {

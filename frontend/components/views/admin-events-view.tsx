@@ -361,7 +361,7 @@ export function AdminEventsView() {
   useEffect(() => {
     let cancelled = false
     listEvents()
-      .then(({ events: all }) => {
+      .then(({ items: all }) => {
         if (!cancelled) setTotalCount(all?.length ?? 0)
       })
       .catch(() => {
@@ -476,7 +476,7 @@ export function AdminEventsView() {
       setFormOpen(false)
       fetchEvents()
       listEvents()
-        .then(({ events: all }) => setTotalCount(all?.length ?? 0))
+        .then(({ items: all }) => setTotalCount(all?.length ?? 0))
         .catch(() => {
           /* best-effort */
         })
@@ -504,7 +504,7 @@ export function AdminEventsView() {
       toast.success('Event deleted')
       fetchEvents()
       listEvents()
-        .then(({ events: all }) => setTotalCount(all?.length ?? 0))
+        .then(({ items: all }) => setTotalCount(all?.length ?? 0))
         .catch(() => {
           /* best-effort */
         })

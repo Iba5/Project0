@@ -198,9 +198,10 @@ class ParticipantBase(CamelModel):
     bio: Optional[str] = None  # Biography
     status: ContestantStatus = ContestantStatus.DRAFT
     votes: int = 0
+    event_id: str  # Required for participant creation
 
 class ParticipantCreate(ParticipantBase):
-    competition_id: Optional[str] = None
+    pass  # event_id is now required
 
 class ParticipantResponse(ParticipantBase):
     id: str

@@ -8,8 +8,16 @@
  * If the variable is not set, it defaults to http://localhost:8000.
  */
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || process.env.BACKEND_API_URL || 'http://localhost:8000/api/v1'
+function normalizeApiBaseUrl(raw: string): string {
+  const trimmed = raw.replace(/\/+$/, '')
+  if (trimmed.endsWith('/api/v1')) return trimmed
+  if (trimmed.match(/^https?:\/\/[^/]+$/)) return `${trimmed}/api/v1`
+  return trimmed
+}
+
+const API_BASE_URL = normalizeApiBaseUrl(
+  process.env.NEXT_PUBLIC_API_URL || process.env.BACKEND_API_URL || 'http://localhost:8000/api/v1',
+)
 
 const TOKEN_KEY = 'voting_admin_token'
 

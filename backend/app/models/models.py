@@ -138,13 +138,8 @@ class Participant(Base):
     votes: Mapped[int] = mapped_column(Integer, default=0, index=True)  # Index for leaderboard sorting
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)  # Index for date queries
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)  # Soft delete field
-    event_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)  # Associated event for public pages
-
-    # Foreign key to Competition (nullable for backward compatibility)
-    competition_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("competitions.id"), nullable=True, index=True)
-    competition: Mapped[Optional["Competition"]] = relationship("Competition", back_populates="participants")
     
-    # Foreign key to Event (for public participant pages)
+    # Foreign key to Event (required in practice, nullable in DB for migration safety)
     event_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("events.id"), nullable=True, index=True)
     event: Mapped[Optional["Event"]] = relationship("Event", back_populates="participants")
 

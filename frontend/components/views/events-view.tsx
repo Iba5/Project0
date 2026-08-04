@@ -95,6 +95,11 @@ function daysRemaining(endISO: string): number | null {
   return Math.max(0, differenceInCalendarDays(end, now))
 }
 
+function formatVotePrice(value: unknown): string {
+  const num = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(num) ? num.toFixed(2) : '0.00'
+}
+
 // ─── Card sub-components ──────────────────────────────────────────
 
 function StatusPill({ bucket }: { bucket: ReturnType<typeof classifyEvent> }) {
@@ -255,7 +260,7 @@ function EventCard({ event, onViewContestants, onShare }: { event: EventItem; on
             }}
           >
             <DollarSign className="w-3 h-3" />
-            {event.votePrice.toFixed(2)} {event.currency} per vote
+            {formatVotePrice(event.votePrice)} {event.currency} per vote
           </span>
           <span
             className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold"

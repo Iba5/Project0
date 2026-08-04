@@ -910,7 +910,7 @@ class ParticipantService:
             bio=part_in.bio,
             status=part_in.status,
             votes=part_in.votes,
-            competition_id=part_in.competition_id,
+            event_id=part_in.event_id,  # Now uses event_id instead of competition_id
         )
         saved = self.part_repo.create(new_part)
 
@@ -918,11 +918,11 @@ class ParticipantService:
             db=self.db,
             action="Contestant Created",
             user_id=self.user_id,
-            details=f"Created contestant: {saved.name} ({saved.id})"
+            details=f"Created contestant: {saved.name} ({saved.id}) for event: {saved.event_id}"
         )
         
         # TODO: Re-enable async cache invalidation when event loop is properly configured
-        # self._invalidate_participant_cache_async(saved.id, saved.competition_id)
+        # self._invalidate_participant_cache_async(saved.id, saved.event_id)
         
         return saved
 

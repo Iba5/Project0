@@ -303,9 +303,9 @@ export default function LandingView() {
   useEffect(() => {
     let cancelled = false
     listPublicEvents()
-      .then(({ events }) => {
+      .then(({ items }) => {
         if (cancelled) return
-        const visible = (events || [])
+        const visible = (items || [])
           .filter((e) => {
             const s = (e.status || '').toLowerCase().replace(/\s+/g, '')
             return (
