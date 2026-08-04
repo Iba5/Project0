@@ -83,8 +83,9 @@ export function AdminAdminsView() {
     try {
       const { admins: a } = await listAdmins()
       setAdmins(a)
-    } catch {
-      toast.error('Failed to fetch admins')
+    } catch (error) {
+      console.error('Failed to fetch admins:', error)
+      toast.error(error instanceof Error ? error.message : 'Failed to fetch admins')
     } finally {
       setLoading(false)
     }
