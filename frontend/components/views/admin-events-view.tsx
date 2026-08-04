@@ -19,8 +19,9 @@ import {
   Download,
   Calendar,
   Inbox,
+  Send,
 } from 'lucide-react'
-import { listEvents, createEvent, updateEvent, deleteEvent, type EventItem } from '@/lib/api'
+import { listEvents, createEvent, updateEvent, deleteEvent, publishEvent, type EventItem } from '@/lib/api'
 import { uploadImage } from '@/lib/upload-api'
 import { apiUrl } from '@/lib/api-client'
 import { nameToSolidGradient } from '@/lib/utils'
@@ -82,34 +83,41 @@ const eventSchema = z.object({
   votePrice: z.coerce.number().min(0.5, 'Vote price must be at least $0.50'),
   votesPerPayment: z.coerce.number().min(1, 'Votes per payment must be at least 1'),
   currency: z.string().min(1, 'Currency is required'),
+  registrationOpens: z.string().optional(),
+  registrationCloses: z.string().optional(),
   votingOpens: z.string().optional(),
   votingCloses: z.string().optional(),
   publicLeaderboard: z.boolean().default(true),
+  requireContestantApproval: z.boolean().default(true),
+  enableVideos: z.boolean().default(false),
 })
 
 type EventFormValues = z.infer<typeof eventSchema>
 
-const ONGOING_STATUSES = ['Ongoing', 'Voting Open', 'Registration Open']
+const ONGOING_STATUSES = ['Published', 'Voting Open', 'Registration Open']
 
 const statusPills: { label: string; value: string }[] = [
   { label: 'All Events', value: 'all' },
   { label: 'Draft', value: 'Draft' },
-  { label: 'Ongoing', value: 'Ongoing' },
+  { label: 'Published', value: 'Published' },
   { label: 'Upcoming', value: 'Upcoming' },
   { label: 'Completed', value: 'Completed' },
 ]
 
-function statusBadge(status: string) {
+function statusBadge(status: string, computedStatus?: string) {
+  const displayStatus = computedStatus || status
   const map: Record<string, { bg: string; text: string; border: string; dot: string }> = {
     Draft: { bg: 'rgba(148,163,184,0.15)', text: 'var(--text-muted)', border: 'rgba(148,163,184,0.3)', dot: 'var(--text-muted)' },
+    Published: { bg: 'rgba(16,185,129,0.15)', text: '#10B981', border: 'rgba(16,185,129,0.3)', dot: '#10B981' },
     Upcoming: { bg: 'rgba(56,189,248,0.15)', text: '#38BDF8', border: 'rgba(56,189,248,0.3)', dot: '#38BDF8' },
     'Voting Open': { bg: 'rgba(245,158,11,0.15)', text: '#F59E0B', border: 'rgba(245,158,11,0.3)', dot: '#F59E0B' },
-    'Registration Open': { bg: 'rgba(16,185,129,0.15)', text: '#10B981', border: 'rgba(16,185,129,0.3)', dot: '#10B981' },
+    'Voting Closed': { bg: 'rgba(148,163,184,0.15)', text: 'var(--text-muted)', border: 'rgba(148,163,184,0.3)', dot: 'var(--text-muted)' },
+    'Registration Open': { bg: 'rgba(34,197,94,0.15)', text: '#22C55E', border: 'rgba(34,197,94,0.3)', dot: '#22C55E' },
     Completed: { bg: 'rgba(148,163,184,0.15)', text: 'var(--text-muted)', border: 'rgba(148,163,184,0.3)', dot: 'var(--text-muted)' },
     Cancelled: { bg: 'rgba(239,68,68,0.15)', text: '#EF4444', border: 'rgba(239,68,68,0.3)', dot: '#EF4444' },
-    Ongoing: { bg: 'rgba(245,158,11,0.15)', text: '#F59E0B', border: 'rgba(245,158,11,0.3)', dot: '#F59E0B' },
+    Archived: { bg: 'rgba(99,102,241,0.15)', text: '#6366F1', border: 'rgba(99,102,241,0.3)', dot: '#6366F1' },
   }
-  const s = map[status] || map.Draft
+  const s = map[displayStatus] || map.Draft
   return (
     <Badge
       style={{
@@ -123,7 +131,7 @@ function statusBadge(status: string) {
         className="w-1.5 h-1.5 rounded-full"
         style={{ background: s.dot }}
       />
-      {status}
+      {displayStatus}
     </Badge>
   )
 }
@@ -379,9 +387,13 @@ export function AdminEventsView() {
       votePrice: 1,
       votesPerPayment: 1,
       currency: 'USD',
+      registrationOpens: '',
+      registrationCloses: '',
       votingOpens: '',
       votingCloses: '',
       publicLeaderboard: true,
+      requireContestantApproval: true,
+      enableVideos: false,
     },
   })
 
@@ -397,9 +409,13 @@ export function AdminEventsView() {
       votePrice: 1,
       votesPerPayment: 1,
       currency: 'USD',
+      registrationOpens: '',
+      registrationCloses: '',
       votingOpens: '',
       votingCloses: '',
       publicLeaderboard: true,
+      requireContestantApproval: true,
+      enableVideos: false,
     })
     setFormOpen(true)
   }
@@ -416,9 +432,13 @@ export function AdminEventsView() {
       votePrice: event.votePrice,
       votesPerPayment: event.votesPerPayment,
       currency: event.currency,
+      registrationOpens: event.registrationOpens ? new Date(event.registrationOpens).toISOString().slice(0, 16) : '',
+      registrationCloses: event.registrationCloses ? new Date(event.registrationCloses).toISOString().slice(0, 16) : '',
       votingOpens: event.votingOpens ? new Date(event.votingOpens).toISOString().slice(0, 16) : '',
       votingCloses: event.votingCloses ? new Date(event.votingCloses).toISOString().slice(0, 16) : '',
       publicLeaderboard: event.publicLeaderboard,
+      requireContestantApproval: event.requireContestantApproval,
+      enableVideos: event.enableVideos,
     })
     setFormOpen(true)
   }
@@ -431,6 +451,8 @@ export function AdminEventsView() {
         banner: values.banner || null,
         startDate: values.startDate,
         endDate: values.endDate,
+        registrationOpens: values.registrationOpens || null,
+        registrationCloses: values.registrationCloses || null,
         votingOpens: values.votingOpens || null,
         votingCloses: values.votingCloses || null,
         description: values.description || null,
@@ -464,6 +486,16 @@ export function AdminEventsView() {
     }
   }
 
+  const handlePublish = async (eventId: string) => {
+    try {
+      await publishEvent(eventId)
+      toast.success('Event published successfully')
+      fetchEvents()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to publish event')
+    }
+  }
+
   const handleDelete = async () => {
     if (!deletingId) return
     try {
@@ -484,7 +516,7 @@ export function AdminEventsView() {
   }
 
   const handleCopyEventLink = (event: EventItem) => {
-    const link = `${window.location.origin}?event=${event.id}`
+    const link = event.shareLink || `${window.location.origin}/events/${event.id}`
     navigator.clipboard.writeText(link).then(() => {
       toast.success('Event link copied to clipboard!')
     }).catch(() => {
@@ -738,7 +770,7 @@ export function AdminEventsView() {
                         </div>
                       </div>
                     </TableCell>
-                    <TableCell>{statusBadge(event.status)}</TableCell>
+                    <TableCell>{statusBadge(event.status, event.computedStatus)}</TableCell>
                     <TableCell className="text-sm" style={{ color: 'var(--text-muted)' }}>
                       {new Date(event.startDate).toLocaleDateString(undefined, {
                         year: 'numeric',
@@ -755,6 +787,18 @@ export function AdminEventsView() {
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-1 justify-end">
+                        {event.status === 'Draft' && (
+                          <ActionTooltip label="Publish Event">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 hover:bg-green-500/10"
+                              onClick={() => handlePublish(event.id)}
+                            >
+                              <Send className="w-4 h-4" style={{ color: '#10B981' }} />
+                            </Button>
+                          </ActionTooltip>
+                        )}
                         <ActionTooltip label="Edit Event">
                           <Button
                             variant="ghost"
@@ -894,11 +938,9 @@ export function AdminEventsView() {
                     </SelectTrigger>
                     <SelectContent style={{ background: 'var(--surface-elevated)', color: 'var(--text-primary)' }}>
                       <SelectItem value="Draft">Draft</SelectItem>
-                      <SelectItem value="Upcoming">Upcoming</SelectItem>
-                      <SelectItem value="Registration Open">Registration Open</SelectItem>
-                      <SelectItem value="Voting Open">Voting Open</SelectItem>
-                      <SelectItem value="Completed">Completed</SelectItem>
+                      <SelectItem value="Published">Published</SelectItem>
                       <SelectItem value="Cancelled">Cancelled</SelectItem>
+                      <SelectItem value="Archived">Archived</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -949,6 +991,26 @@ export function AdminEventsView() {
                 </div>
 
                 <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-muted)' }}>Registration Opens</Label>
+                  <Input
+                    type="datetime-local"
+                    {...form.register('registrationOpens')}
+                    className="rounded-xl border-none"
+                    style={{ background: 'var(--surface-3)', color: 'var(--text-primary)' }}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-muted)' }}>Registration Closes</Label>
+                  <Input
+                    type="datetime-local"
+                    {...form.register('registrationCloses')}
+                    className="rounded-xl border-none"
+                    style={{ background: 'var(--surface-3)', color: 'var(--text-primary)' }}
+                  />
+                </div>
+
+                <div className="space-y-2">
                   <Label style={{ color: 'var(--text-muted)' }}>Voting Opens</Label>
                   <Input
                     type="datetime-local"
@@ -968,12 +1030,28 @@ export function AdminEventsView() {
                   />
                 </div>
 
-                <div className="space-y-2 flex items-center gap-3 sm:col-span-2 pt-1">
+                <div className="space-y-2 flex items-center gap-3">
                   <Switch
                     checked={form.watch('publicLeaderboard')}
                     onCheckedChange={(val) => form.setValue('publicLeaderboard', val)}
                   />
                   <Label style={{ color: 'var(--text-muted)' }}>Public Leaderboard</Label>
+                </div>
+
+                <div className="space-y-2 flex items-center gap-3">
+                  <Switch
+                    checked={form.watch('requireContestantApproval')}
+                    onCheckedChange={(val) => form.setValue('requireContestantApproval', val)}
+                  />
+                  <Label style={{ color: 'var(--text-muted)' }}>Require Contestant Approval</Label>
+                </div>
+
+                <div className="space-y-2 flex items-center gap-3">
+                  <Switch
+                    checked={form.watch('enableVideos')}
+                    onCheckedChange={(val) => form.setValue('enableVideos', val)}
+                  />
+                  <Label style={{ color: 'var(--text-muted)' }}>Enable Participant Videos</Label>
                 </div>
               </div>
             </div>

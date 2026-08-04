@@ -2,12 +2,20 @@ export type UserRole = "Super Admin" | "Admin" | "Moderator"
 
 export type EventStatus =
   | "Draft"
+  | "Published"
+  | "Cancelled"
+  | "Archived"
+
+export type ComputedEventStatus =
+  | "Draft"
+  | "Published"
+  | "Cancelled"
+  | "Archived"
   | "Upcoming"
   | "Registration Open"
   | "Voting Open"
   | "Voting Closed"
   | "Completed"
-  | "Archived"
 
 export type ContestantStatus =
   | "Draft"
@@ -59,12 +67,19 @@ export type EventRecord = {
   startDate: string
   endDate: string
   status: EventStatus
+  computedStatus?: ComputedEventStatus
   votePrice: number
   votesPerPayment: number
   currency: string
+  registrationOpens: string | null
+  registrationCloses: string | null
   votingOpens: string | null
   votingCloses: string | null
   publicLeaderboard: boolean
+  requireContestantApproval: boolean
+  enableVideos: boolean
+  shareLink: string | null
+  eventId: string | null
 }
 
 export type ParticipantRecord = {
@@ -72,13 +87,14 @@ export type ParticipantRecord = {
   name: string
   category: string
   platform: SocialPlatformType
-  videoUrl: string
+  videoUrl: string | null
   imageUrl: string | null
   thumbnailUrl: string | null
   bio: string | null
   status: ContestantStatus
   votes: number
   eventId: string | null
+  competitionId: string | null
 }
 
 export type PaymentRecord = {

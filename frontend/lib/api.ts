@@ -194,6 +194,7 @@ export interface EventItem {
   startDate: string
   endDate: string
   status: string
+  computedStatus?: string
   votePrice: number
   votesPerPayment: number
   currency: string
@@ -203,6 +204,9 @@ export interface EventItem {
   votingCloses: string | null
   publicLeaderboard: boolean
   requireContestantApproval: boolean
+  enableVideos: boolean
+  shareLink: string | null
+  eventId: string | null
   competitionId: string | null
   createdAt: string
   deletedAt: string | null
@@ -248,6 +252,12 @@ export async function deleteEvent(id: string): Promise<void> {
   return apiFetch(`/events/${id}`, { method: 'DELETE' })
 }
 
+export async function publishEvent(id: string): Promise<{ event: EventItem }> {
+  return apiFetch(`/events/${id}/publish`, {
+    method: 'POST',
+  })
+}
+
 // ─── Participants ────────────────────────────────────────────────
 
 export interface ParticipantItem {
@@ -255,7 +265,7 @@ export interface ParticipantItem {
   name: string
   category: string
   platform: string
-  videoUrl: string
+  videoUrl: string | null
   imageUrl: string | null
   thumbnailUrl: string | null
   bio: string | null
@@ -388,6 +398,20 @@ export async function inviteAdmin(payload: { email: string; name: string; role?:
     method: 'POST',
     body: JSON.stringify(payload),
   })
+}
+
+// ─── Public API ───────────────────────────────────────────────────
+
+export async function getPublicEvent(eventId: string): Promise<EventItem> {
+  return apiFetch(`/public/events/${eventId}`)
+}
+
+export async function getPublicEventParticipants(eventId: string): Promise<{ participants: ParticipantItem[] }> {
+  return apiFetch(`/public/events/${eventId}/participants`)
+}
+
+export async function getPublicParticipant(participantId: string): Promise<ParticipantItem> {
+  return apiFetch(`/public/participants/${participantId}`)
 }
 
 // ─── Social Router ───────────────────────────────────────────────

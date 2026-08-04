@@ -89,7 +89,7 @@ const participantSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters').max(100, 'Name must be less than 100 characters'),
   category: z.string().min(2, 'Category must be at least 2 characters').max(50, 'Category must be less than 50 characters'),
   platform: z.string().min(1, 'Platform is required'),
-  videoUrl: z.string().url('Video URL must be a valid URL').min(10, 'Video URL must be at least 10 characters'),
+  videoUrl: z.string().url('Video URL must be a valid URL').optional().or(z.literal('')),
   bio: z.string().max(500, 'Bio must be less than 500 characters').optional(),
   status: z.string().default('Draft'),
   imageUrl: z.string().optional(),
@@ -318,7 +318,7 @@ function ParticipantFormFields({
       </div>
 
       <div className="space-y-2">
-        <Label style={{ color: 'var(--text-muted)' }}>Video URL</Label>
+        <Label style={{ color: 'var(--text-muted)' }}>Video URL (Optional)</Label>
         <Input
           {...form.register('videoUrl')}
           className="rounded-xl border-none"
