@@ -4,11 +4,11 @@ from typing import Any, List, Optional, Tuple, Type, TypeVar, Generic
 from sqlalchemy.orm import Session,Query
 from app.models.models import (
     User, Event, Participant, Payment, Activity, 
-    SocialPlatformSync, Setting, VoteTransaction, AuditLog, Competition,
+    Setting, VoteTransaction, AuditLog, Competition,
     PaymentMethodConfig, TestPayment
 )
 from app.enums.enums import (
-    EventStatus, ContestantStatus, SocialPlatform as PlatformEnum, 
+    EventStatus, ContestantStatus, 
     UserRole, CompetitionStatus, PaymentStatus
 )
 
@@ -131,8 +131,8 @@ class EventRepository(BaseRepository[Event]):
         super().__init__(Event, db)
 
     def get_active_event(self) -> Optional[Event]:
-        # Fetch first ongoing voting event
-        query = self.db.query(Event).filter(Event.status == EventStatus.VOTING_OPEN)
+        # Fetch first published event (active voting event)
+        query = self.db.query(Event).filter(Event.status == EventStatus.PUBLISHED)
         if hasattr(Event, "deleted_at"):
             query = query.filter(Event.deleted_at.is_(None))
         return query.first()
@@ -162,7 +162,6 @@ class ParticipantRepository(BaseRepository[Participant]):
     self,
     search: str | None = None,
     status: ContestantStatus | None = None,
-    platform: PlatformEnum | None = None,
     competition_id: str | None = None,
 ) -> Query[Participant]:
         query = self._base_query()
@@ -177,18 +176,16 @@ class ParticipantRepository(BaseRepository[Participant]):
             )
         if status:
             query = query.filter(Participant.status == status)
-        if platform:
-            query = query.filter(Participant.platform == platform)
         if competition_id:
             query = query.filter(Participant.competition_id == competition_id)
         return query
 
     def search_and_filter(
-        self, search: Optional[str] = None, status: Optional[ContestantStatus] = None, 
-        platform: Optional[PlatformEnum] = None, competition_id: Optional[str] = None,
+        self, search: Optional[str] = None, status: Optional[ContestantStatus] = None,
+        competition_id: Optional[str] = None,
         offset: int = 0, limit: int = DEFAULT_MAX_PAGE_SIZE
     ) -> Tuple[List[Participant], int]:
-        query = self._filtered_query(search, status, platform, competition_id)
+        query = self._filtered_query(search, status, competition_id)
         total = query.count()
         items = query.offset(offset).limit(limit).all()
         return items, total
@@ -308,14 +305,6 @@ class ActivityRepository(BaseRepository[Activity]):
 
     def get_recent(self, limit: int = 5) -> List[Activity]:
         return self.db.query(Activity).order_by(Activity.time.desc()).limit(limit).all()
-
-
-class SocialPlatformRepository(BaseRepository[SocialPlatformSync]):
-    def __init__(self, db: Session):
-        super().__init__(SocialPlatformSync, db)
-
-    def get_by_platform(self, platform: PlatformEnum) -> Optional[SocialPlatformSync]:
-        return self.db.query(SocialPlatformSync).filter(SocialPlatformSync.platform == platform).first()
 
 
 class SettingsRepository:

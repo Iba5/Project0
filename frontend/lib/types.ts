@@ -1,42 +1,40 @@
-export type UserRole = "Super Admin" | "Admin" | "Moderator"
+export type UserRole = "super_admin" | "admin" | "moderator"
 
 export type EventStatus =
-  | "Draft"
-  | "Published"
-  | "Cancelled"
-  | "Archived"
+  | "draft"
+  | "published"
+  | "cancelled"
+  | "archived"
 
 export type ComputedEventStatus =
-  | "Draft"
-  | "Published"
-  | "Cancelled"
-  | "Archived"
-  | "Upcoming"
-  | "Registration Open"
-  | "Voting Open"
-  | "Voting Closed"
-  | "Completed"
+  | "draft"
+  | "published"
+  | "cancelled"
+  | "archived"
+  | "upcoming"
+  | "registration_open"
+  | "voting_open"
+  | "voting_closed"
+  | "completed"
 
 export type ContestantStatus =
-  | "Draft"
-  | "Submitted"
-  | "Under Review"
-  | "Approved"
-  | "Rejected"
-  | "Disqualified"
-  | "Archived"
+  | "draft"
+  | "submitted"
+  | "under_review"
+  | "approved"
+  | "rejected"
+  | "disqualified"
+  | "archived"
 
 export type PaymentStatus =
-  | "Created"
-  | "Pending"
-  | "Processing"
-  | "Paid"
-  | "Failed"
-  | "Cancelled"
-  | "Refunded"
-  | "Expired"
-
-export type SocialPlatformType = "TikTok" | "Facebook" | "Instagram" | "YouTube"
+  | "created"
+  | "pending"
+  | "processing"
+  | "paid"
+  | "failed"
+  | "cancelled"
+  | "refunded"
+  | "expired"
 
 export type ViewName =
   | "landing"
@@ -54,7 +52,6 @@ export type ViewName =
   | "admin-payments"
   | "admin-admins"
   | "admin-settings"
-  | "admin-social-router"
   | "admin-forgot-password"
   | "compare"
   | "notifications"
@@ -86,7 +83,6 @@ export type ParticipantRecord = {
   id: string
   name: string
   category: string
-  platform: SocialPlatformType
   videoUrl: string | null
   imageUrl: string | null
   thumbnailUrl: string | null
@@ -187,12 +183,4 @@ export type PaymentMethodOption = {
   name: string
   type: "mobile_money" | "card" | "digital_wallet"
   isPrimary?: boolean
-}
-
-export type SocialPlatformStatus = {
-  id: string
-  platform: string
-  status: "Connected" | "Syncing" | "Failed" | "Disconnected"
-  lastSync: string | null
-  detail: string | null
 }

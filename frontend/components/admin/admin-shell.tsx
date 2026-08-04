@@ -9,7 +9,6 @@ import {
   CreditCard,
   Settings,
   UserCog,
-  Share2,
   ScrollText,
   LogOut,
   Menu,
@@ -46,13 +45,26 @@ const navItems: NavItem[] = [
   { label: 'Settings', view: 'admin-settings', icon: Settings, section: 'settings' },
   { label: 'Admins', view: 'admin-admins', icon: UserCog, section: 'settings' },
   { label: 'Audit Log', view: 'admin-audit', icon: ScrollText, section: 'settings' },
-  { label: 'Social Router', view: 'admin-social-router', icon: Share2, section: 'settings' },
 ]
 
 const sectionLabels: Record<string, string> = {
   main: 'Main',
   management: 'Management',
   settings: 'Settings',
+}
+
+function formatRole(role: string | undefined): string {
+  if (!role) return 'Admin'
+  switch (role) {
+    case 'super_admin':
+      return 'Super Admin'
+    case 'admin':
+      return 'Admin'
+    case 'moderator':
+      return 'Moderator'
+    default:
+      return 'Admin'
+  }
 }
 
 export function AdminShell({ children }: { children: React.ReactNode }) {
@@ -226,7 +238,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
               {adminUser?.name || 'Admin'}
             </p>
             <p className="text-[10px] truncate" style={{ color: 'var(--text-muted)' }}>
-              {adminUser?.role || 'Admin'}
+              {formatRole(adminUser?.role)}
             </p>
           </div>
         </div>

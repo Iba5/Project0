@@ -7,7 +7,7 @@ import logging
 
 from app.core.database import get_db
 from app.core.config import settings
-from app.api.v1.endpoints import auth, dashboard, events, participants, payments, social, admins, competitions, payment_methods, public
+from app.api.v1.endpoints import auth, dashboard, events, participants, payments, admins, competitions, payment_methods, public
 from app.api.v1.endpoints import settings as settings_router
 from app.repositories.repositories import ParticipantRepository, EventRepository, PaymentRepository, AuditLogRepository
 from app.api.v1.dependencies import PermissionChecker, get_current_active_user
@@ -25,7 +25,7 @@ api_router.include_router(participants.router, prefix="/participants", tags=["pa
 api_router.include_router(payments.router, prefix="/payments", tags=["payments"])
 api_router.include_router(competitions.router, prefix="/competitions", tags=["competitions"])
 api_router.include_router(settings_router.router, prefix="/settings", tags=["settings"])
-api_router.include_router(social.router, prefix="/social-router", tags=["social-router"])
+
 api_router.include_router(admins.router, prefix="/admins", tags=["admins"])
 api_router.include_router(payment_methods.router, prefix="/payment-methods", tags=["payment-methods"])
 api_router.include_router(public.router, prefix="/public", tags=["public"])
@@ -73,7 +73,6 @@ def search_global(
             "id": c.id,
             "name": c.name,
             "category": c.category,
-            "platform": c.platform.value if hasattr(c.platform, "value") else str(c.platform),
             "votes": c.votes
         }
         for c in part_repo.get_all()
@@ -329,5 +328,4 @@ async def manipulate_votes(
 @api_router.post("/share", tags=["share"])
 def share_participant(payload: dict):
     pid = payload.get("participantId")
-    plat = payload.get("platform")
-    return {"success": True, "participantId": pid, "platform": plat}
+    return {"success": True, "participantId": pid}

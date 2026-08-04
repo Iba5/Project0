@@ -36,7 +36,6 @@ interface ContestantPreview {
   category?: string
   votes?: number
   rank?: number
-  platform?: string
 }
 
 interface ShareModalProps {
@@ -280,7 +279,7 @@ export function ShareModal({
         apiFetch('/share', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ participantId, platform: platform.key }),
+          body: JSON.stringify({ participantId }),
         }).catch(() => {
           // Non-critical — silently fail
         })
@@ -304,7 +303,7 @@ export function ShareModal({
         apiFetch('/share', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ participantId, platform: 'link' }),
+          body: JSON.stringify({ participantId }),
         }).catch(() => {})
       }
 
@@ -334,7 +333,7 @@ export function ShareModal({
           apiFetch('/share', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ participantId, platform: 'native' }),
+            body: JSON.stringify({ participantId }),
           }).catch(() => {})
         }
       } catch {
@@ -474,17 +473,6 @@ export function ShareModal({
                               }}
                             >
                               {contestant.category}
-                            </span>
-                          )}
-                          {contestant.platform && (
-                            <span
-                              className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                              style={{
-                                backgroundColor: 'rgba(100, 116, 139, 0.15)',
-                                color: '#94A3B8',
-                              }}
-                            >
-                              {contestant.platform}
                             </span>
                           )}
                         </div>

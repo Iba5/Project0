@@ -16,7 +16,6 @@ export type ViewName =
   | 'admin-payment-methods'
   | 'admin-settings'
   | 'admin-admins'
-  | 'admin-social-router'
   | 'admin-audit'
   | 'admin-forgot-password'
   | 'notifications'

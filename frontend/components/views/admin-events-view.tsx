@@ -94,30 +94,30 @@ const eventSchema = z.object({
 
 type EventFormValues = z.infer<typeof eventSchema>
 
-const ONGOING_STATUSES = ['Published', 'Voting Open', 'Registration Open']
+const ONGOING_STATUSES = ['published', 'voting_open', 'registration_open']
 
 const statusPills: { label: string; value: string }[] = [
   { label: 'All Events', value: 'all' },
-  { label: 'Draft', value: 'Draft' },
-  { label: 'Published', value: 'Published' },
-  { label: 'Upcoming', value: 'Upcoming' },
-  { label: 'Completed', value: 'Completed' },
+  { label: 'Draft', value: 'draft' },
+  { label: 'Published', value: 'published' },
+  { label: 'Upcoming', value: 'upcoming' },
+  { label: 'Completed', value: 'completed' },
 ]
 
 function statusBadge(status: string, computedStatus?: string) {
   const displayStatus = computedStatus || status
   const map: Record<string, { bg: string; text: string; border: string; dot: string }> = {
-    Draft: { bg: 'rgba(148,163,184,0.15)', text: 'var(--text-muted)', border: 'rgba(148,163,184,0.3)', dot: 'var(--text-muted)' },
-    Published: { bg: 'rgba(16,185,129,0.15)', text: '#10B981', border: 'rgba(16,185,129,0.3)', dot: '#10B981' },
-    Upcoming: { bg: 'rgba(56,189,248,0.15)', text: '#38BDF8', border: 'rgba(56,189,248,0.3)', dot: '#38BDF8' },
-    'Voting Open': { bg: 'rgba(245,158,11,0.15)', text: '#F59E0B', border: 'rgba(245,158,11,0.3)', dot: '#F59E0B' },
-    'Voting Closed': { bg: 'rgba(148,163,184,0.15)', text: 'var(--text-muted)', border: 'rgba(148,163,184,0.3)', dot: 'var(--text-muted)' },
-    'Registration Open': { bg: 'rgba(34,197,94,0.15)', text: '#22C55E', border: 'rgba(34,197,94,0.3)', dot: '#22C55E' },
-    Completed: { bg: 'rgba(148,163,184,0.15)', text: 'var(--text-muted)', border: 'rgba(148,163,184,0.3)', dot: 'var(--text-muted)' },
-    Cancelled: { bg: 'rgba(239,68,68,0.15)', text: '#EF4444', border: 'rgba(239,68,68,0.3)', dot: '#EF4444' },
-    Archived: { bg: 'rgba(99,102,241,0.15)', text: '#6366F1', border: 'rgba(99,102,241,0.3)', dot: '#6366F1' },
+    draft: { bg: 'rgba(148,163,184,0.15)', text: 'var(--text-muted)', border: 'rgba(148,163,184,0.3)', dot: 'var(--text-muted)' },
+    published: { bg: 'rgba(16,185,129,0.15)', text: '#10B981', border: 'rgba(16,185,129,0.3)', dot: '#10B981' },
+    upcoming: { bg: 'rgba(56,189,248,0.15)', text: '#38BDF8', border: 'rgba(56,189,248,0.3)', dot: '#38BDF8' },
+    voting_open: { bg: 'rgba(245,158,11,0.15)', text: '#F59E0B', border: 'rgba(245,158,11,0.3)', dot: '#F59E0B' },
+    voting_closed: { bg: 'rgba(148,163,184,0.15)', text: 'var(--text-muted)', border: 'rgba(148,163,184,0.3)', dot: 'var(--text-muted)' },
+    registration_open: { bg: 'rgba(34,197,94,0.15)', text: '#22C55E', border: 'rgba(34,197,94,0.3)', dot: '#22C55E' },
+    completed: { bg: 'rgba(148,163,184,0.15)', text: 'var(--text-muted)', border: 'rgba(148,163,184,0.3)', dot: 'var(--text-muted)' },
+    cancelled: { bg: 'rgba(239,68,68,0.15)', text: '#EF4444', border: 'rgba(239,68,68,0.3)', dot: '#EF4444' },
+    archived: { bg: 'rgba(99,102,241,0.15)', text: '#6366F1', border: 'rgba(99,102,241,0.3)', dot: '#6366F1' },
   }
-  const s = map[displayStatus] || map.Draft
+  const s = map[displayStatus] || map.draft
   return (
     <Badge
       style={{
@@ -383,7 +383,7 @@ export function AdminEventsView() {
       banner: '',
       startDate: '',
       endDate: '',
-      status: 'Draft',
+      status: 'draft',
       votePrice: 1,
       votesPerPayment: 1,
       currency: 'USD',
@@ -405,7 +405,7 @@ export function AdminEventsView() {
       banner: '',
       startDate: '',
       endDate: '',
-      status: 'Draft',
+      status: 'draft',
       votePrice: 1,
       votesPerPayment: 1,
       currency: 'USD',
@@ -566,10 +566,10 @@ export function AdminEventsView() {
   const safeEvents = events || []
   const pillCounts: Record<string, number> = {
     all: totalCount,
-    Draft: safeEvents.filter((e) => e.status === 'Draft').length,
+    Draft: safeEvents.filter((e) => e.status === 'draft').length,
     Ongoing: safeEvents.filter((e) => ONGOING_STATUSES.includes(e.status)).length,
-    Upcoming: safeEvents.filter((e) => e.status === 'Upcoming').length,
-    Completed: safeEvents.filter((e) => e.status === 'Completed').length,
+    Upcoming: safeEvents.filter((e) => e.status === 'upcoming').length,
+    Completed: safeEvents.filter((e) => e.status === 'completed').length,
   }
 
   return (
@@ -787,7 +787,7 @@ export function AdminEventsView() {
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-1 justify-end">
-                        {event.status === 'Draft' && (
+                        {event.status === 'draft' && (
                           <ActionTooltip label="Publish Event">
                             <Button
                               variant="ghost"
@@ -937,10 +937,10 @@ export function AdminEventsView() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent style={{ background: 'var(--surface-elevated)', color: 'var(--text-primary)' }}>
-                      <SelectItem value="Draft">Draft</SelectItem>
-                      <SelectItem value="Published">Published</SelectItem>
-                      <SelectItem value="Cancelled">Cancelled</SelectItem>
-                      <SelectItem value="Archived">Archived</SelectItem>
+                      <SelectItem value="draft">Draft</SelectItem>
+                      <SelectItem value="published">Published</SelectItem>
+                      <SelectItem value="cancelled">Cancelled</SelectItem>
+                      <SelectItem value="archived">Archived</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

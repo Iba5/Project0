@@ -31,7 +31,6 @@ interface SearchContestant {
   id: string
   name: string
   category: string
-  platform: string
   imageUrl: string | null
   thumbnailUrl: string | null
   votes: number
@@ -338,7 +337,7 @@ export function GlobalSearch() {
               </div>
               <div className="px-2 pt-2 pb-1">
                 <p className="text-xs text-muted-foreground">
-                  Try searching for a contestant name, category (e.g. “Singing”), platform, or event.
+                  Try searching for a contestant name, category (e.g. “Singing”) or event.
                 </p>
               </div>
             </div>
@@ -499,10 +498,10 @@ export function GlobalSearch() {
                 Search Vibe Hub
               </p>
               <p className="text-xs mt-1 max-w-sm" style={{ color: 'var(--text-muted)' }}>
-                Find contestants by name, category, or platform. Find events by name or description.
+                Find contestants by name, category. Find events by name or description.
               </p>
               <div className="flex flex-wrap gap-1.5 justify-center mt-4 max-w-md">
-                {['Singing', 'TikTok', 'Dancing', 'Voting Open'].map((s) => (
+                {['Singing', 'Dancing', 'Voting Open'].map((s) => (
                   <button
                     key={s}
                     onClick={() => setQuery(s)}

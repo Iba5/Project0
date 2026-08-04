@@ -1,9 +1,9 @@
 from enum import Enum
 
 class UserRole(str, Enum):
-    SUPER_ADMIN = "Super Admin"
-    ADMIN = "Admin"
-    MODERATOR = "Moderator"
+    SUPER_ADMIN = "super_admin"
+    ADMIN = "admin"
+    MODERATOR = "moderator"
 
 class Permission(str, Enum):
     EVENTS_CREATE = "events.create"
@@ -18,57 +18,35 @@ class Permission(str, Enum):
 
 class EventStatus(str, Enum):
     # Administrative states (manual control)
-    DRAFT = "Draft"
-    PUBLISHED = "Published"
-    CANCELLED = "Cancelled"
-    ARCHIVED = "Archived"
+    DRAFT = "draft"
+    PUBLISHED = "published"
+    CANCELLED = "cancelled"
+    ARCHIVED = "archived"
 
 class ContestantStatus(str, Enum):
-    DRAFT = "Draft"
-    SUBMITTED = "Submitted"
-    UNDER_REVIEW = "Under Review"
-    APPROVED = "Approved"
-    REJECTED = "Rejected"
-    DISQUALIFIED = "Disqualified"
-    ARCHIVED = "Archived"
+    DRAFT = "draft"
+    SUBMITTED = "submitted"
+    UNDER_REVIEW = "under_review"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    DISQUALIFIED = "disqualified"
+    ARCHIVED = "archived"
 
 class PaymentStatus(str, Enum):
-    CREATED = "Created"
-    PENDING = "Pending"
-    PROCESSING = "Processing"
-    PAID = "Paid"
-    FAILED = "Failed"
-    CANCELLED = "Cancelled"
-    REFUNDED = "Refunded"
-    EXPIRED = "Expired"
-
-class SocialPlatform(str, Enum):
-    TIKTOK = "TikTok"
-    FACEBOOK = "Facebook"
-    INSTAGRAM = "Instagram"
-    YOUTUBE = "YouTube"
-
-class SocialSyncStatus(str, Enum):
-    CONNECTED = "Connected"
-    SYNCING = "Syncing"
-    FAILED = "Failed"
-    DISCONNECTED = "Disconnected"
+    CREATED = "created"
+    PENDING = "pending"
+    PROCESSING = "processing"
+    PAID = "paid"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    REFUNDED = "refunded"
+    EXPIRED = "expired"
 
 class CompetitionStatus(str, Enum):
-    DRAFT = "Draft"
-    ACTIVE = "Active"
-    COMPLETED = "Completed"
-    ARCHIVED = "Archived"
-
-class SourcePlatform(str, Enum):
-    TIKTOK = "tiktok"
-    FACEBOOK = "facebook"
-    INSTAGRAM = "instagram"
-    YOUTUBE = "youtube"
-    DIRECT = "direct"
-
-# Strict whitelist for URL parameter validation
-ALLOWED_SOURCE_PLATFORMS = {e.value for e in SourcePlatform}
+    DRAFT = "draft"
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    ARCHIVED = "archived"
 
 class PaymentMethod(str, Enum):
     """Supported payment methods for voting"""

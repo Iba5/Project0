@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.api.v1.dependencies import PermissionChecker, get_current_active_user, PaginationParams
-from app.enums.enums import Permission, ContestantStatus, SocialPlatform
+from app.enums.enums import Permission, ContestantStatus
 from app.services.services import ParticipantService
 from app.schemas.schemas import ParticipantCreate, ParticipantResponse
 from app.repositories.repositories import paginate_response
@@ -16,25 +16,19 @@ allow_read = Depends(PermissionChecker(Permission.CONTESTANTS_READ))
 allow_update = Depends(PermissionChecker(Permission.CONTESTANTS_UPDATE))
 
 @router.get("/public")
-async def list_public_participants(
+def list_public_participants(
     search: Optional[str] = None,
     status: Optional[ContestantStatus] = None,
-    platform: Optional[SocialPlatform] = None,
     competition_id: Optional[str] = None,
     pagination: PaginationParams = Depends(),
     db: Session = Depends(get_db),
 ):
     part_service = ParticipantService(db)
 
-    # Use cached version for default parameters (no filters, first page, default size)
-    if not search and not platform and not status and pagination.page == 1 and pagination.page_size == 20:
-        items, total = await part_service.list_public_participants_cached(
-            search, status, platform, competition_id, pagination.offset, pagination.limit
-        )
-    else:
-        items, total = part_service.list_participants(
-            search, status, platform, competition_id, pagination.offset, pagination.limit
-        )
+    # Use synchronous version for now (async version requires event loop)
+    items, total = part_service.list_participants(
+        search, status, competition_id, pagination.offset, pagination.limit
+    )
 
     return paginate_response(
         items,
@@ -51,14 +45,13 @@ async def list_public_participants(
 def list_participants(
     search: Optional[str] = Query(None, description="Search by name or category"),
     status: Optional[ContestantStatus] = Query(None, description="Filter by contestant lifecycle status"),
-    platform: Optional[SocialPlatform] = Query(None, description="Filter by social media platform"),
     competition_id: Optional[str] = Query(None, description="Filter by competition"),
     pagination: PaginationParams = Depends(),
     db: Session = Depends(get_db)
 ):
     part_service = ParticipantService(db)
     items, total = part_service.list_participants(
-        search, status, platform, competition_id,
+        search, status, competition_id,
         pagination.offset, pagination.limit
     )
     # Return format matching frontend expectation

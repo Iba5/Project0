@@ -9,7 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 from app.enums.enums import (
     UserRole, EventStatus, ContestantStatus, PaymentStatus,
-    SocialPlatform, SocialSyncStatus, CompetitionStatus
+    CompetitionStatus
 )
 
 
@@ -30,7 +30,7 @@ class User(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     email: Mapped[str] = mapped_column(String, unique=True, index=True, nullable=False)
     hashed_password: Mapped[str] = mapped_column(String, nullable=False)
-    role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.ADMIN, nullable=False)
+    role: Mapped[UserRole] = mapped_column(Enum(UserRole, values_callable=lambda x: [e.value for e in x]), default=UserRole.ADMIN, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)  # Soft delete field
@@ -65,7 +65,7 @@ class Competition(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String, nullable=False, index=True)  # Index for search
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    status: Mapped[CompetitionStatus] = mapped_column(Enum(CompetitionStatus), default=CompetitionStatus.DRAFT, nullable=False, index=True)  # Index for status filtering
+    status: Mapped[CompetitionStatus] = mapped_column(Enum(CompetitionStatus, values_callable=lambda x: [e.value for e in x]), default=CompetitionStatus.DRAFT, nullable=False, index=True)  # Index for status filtering
     start_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)  # Index for date queries
     end_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)  # Index for date queries
     # C5 FIX: Numeric for monetary values — Float causes precision corruption
@@ -95,7 +95,7 @@ class Event(Base):
     banner: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     start_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)  # Index for date queries
     end_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)  # Index for date queries
-    status: Mapped[EventStatus] = mapped_column(Enum(EventStatus), default=EventStatus.DRAFT, nullable=False, index=True)  # Index for status filtering
+    status: Mapped[EventStatus] = mapped_column(Enum(EventStatus, values_callable=lambda x: [e.value for e in x]), default=EventStatus.DRAFT, nullable=False, index=True)  # Index for status filtering
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)  # Index for date queries
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)  # Soft delete field
 
@@ -124,18 +124,17 @@ class Event(Base):
 class Participant(Base):
     """
     Contestant in a competition who receives votes.
-    Supports soft deletion and platform validation.
+    Supports soft deletion.
     """
     __tablename__ = "participants"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String, nullable=False, index=True)  # Index for search
     category: Mapped[str] = mapped_column(String, nullable=False, index=True)  # Index for filtering
-    platform: Mapped[SocialPlatform] = mapped_column(Enum(SocialPlatform), nullable=False, index=True)  # Index for platform filtering
     video_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # Optional promotional video
     image_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # Profile picture
     bio: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Biography
-    status: Mapped[ContestantStatus] = mapped_column(Enum(ContestantStatus), default=ContestantStatus.DRAFT, nullable=False, index=True)  # Index for status filtering
+    status: Mapped[ContestantStatus] = mapped_column(Enum(ContestantStatus, values_callable=lambda x: [e.value for e in x]), default=ContestantStatus.DRAFT, nullable=False, index=True)  # Index for status filtering
     votes: Mapped[int] = mapped_column(Integer, default=0, index=True)  # Index for leaderboard sorting
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)  # Index for date queries
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)  # Soft delete field
@@ -166,7 +165,7 @@ class Payment(Base):
     # C5 FIX: Numeric for monetary values — never use Float for money
     amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     payment_method: Mapped[str] = mapped_column(String, nullable=False)  # Ecocash, OneMoney, Paynow, etc.
-    status: Mapped[PaymentStatus] = mapped_column(Enum(PaymentStatus), default=PaymentStatus.CREATED, nullable=False)
+    status: Mapped[PaymentStatus] = mapped_column(Enum(PaymentStatus, values_callable=lambda x: [e.value for e in x]), default=PaymentStatus.CREATED, nullable=False)
     date: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)  # H7 FIX: index for date-ordered queries
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -179,9 +178,6 @@ class Payment(Base):
     voter_phone: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)  # Phone number of the payer
     voter_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)                # Name of actual voter (if proxy)
     voter_email: Mapped[Optional[str]] = mapped_column(String, nullable=True)               # Email of actual voter (if proxy)
-
-    # Traffic source tracking
-    source_platform: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)  # tiktok, facebook, instagram, youtube, direct
 
     # Competition scoping
     competition_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("competitions.id"), nullable=True, index=True)
@@ -267,20 +263,6 @@ class Activity(Base):
     time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
-class SocialPlatformSync(Base):
-    """
-    Sync status of social platforms used to pull video metadata.
-    Renamed from SocialPlatform to avoid conflict with the enum.
-    """
-    __tablename__ = "social_platforms"
-
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    platform: Mapped[SocialPlatform] = mapped_column(Enum(SocialPlatform), nullable=False)
-    status: Mapped[SocialSyncStatus] = mapped_column(Enum(SocialSyncStatus), default=SocialSyncStatus.DISCONNECTED, nullable=False)
-    last_sync: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    detail: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-
-
 class Setting(Base):
     """
     Platform-wide global settings and preferences.
@@ -311,7 +293,6 @@ class TestPayment(Base):
     status: Mapped[str] = mapped_column(String, default="created", nullable=False)
     voter_phone: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     voter_email: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    source_platform: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     competition_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     test_redirect_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     is_test_payment: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

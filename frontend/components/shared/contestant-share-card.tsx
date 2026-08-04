@@ -20,7 +20,6 @@ interface ContestantShareCardProps {
   category: string
   votes: number
   rank?: number
-  platform?: string
   bio?: string | null
   imageUrl?: string | null
   thumbnailUrl?: string | null
@@ -76,7 +75,6 @@ export function ContestantShareCard({
   category,
   votes,
   rank,
-  platform,
   bio,
   imageUrl,
   thumbnailUrl,
@@ -172,7 +170,7 @@ export function ContestantShareCard({
           onOpenChange={setShareModalOpen}
           title={shareTitle}
           description={shareDescription}
-          contestant={{ name, category, votes, rank, platform }}
+          contestant={{ name, category, votes, rank }}
           participantId={id}
         />
       </>
@@ -320,7 +318,7 @@ export function ContestantShareCard({
         onOpenChange={setShareModalOpen}
         title={shareTitle}
         description={shareDescription}
-        contestant={{ name, category, votes, rank, platform }}
+        contestant={{ name, category, votes, rank }}
         participantId={id}
       />
     </>

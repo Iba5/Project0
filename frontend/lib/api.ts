@@ -264,7 +264,6 @@ export interface ParticipantItem {
   id: string
   name: string
   category: string
-  platform: string
   videoUrl: string | null
   imageUrl: string | null
   thumbnailUrl: string | null
@@ -280,7 +279,6 @@ export interface ParticipantItem {
 export interface ListParticipantsParams {
   search?: string
   status?: string
-  platform?: string
   eventId?: string
   category?: string
 }
@@ -289,7 +287,6 @@ export async function listParticipants(params?: ListParticipantsParams): Promise
   const searchParams = new URLSearchParams()
   if (params?.search) searchParams.set('search', params.search)
   if (params?.status) searchParams.set('status', params.status)
-  if (params?.platform) searchParams.set('platform', params.platform)
   if (params?.eventId) searchParams.set('eventId', params.eventId)
   if (params?.category) searchParams.set('category', params.category)
   const qs = searchParams.toString()
@@ -337,7 +334,6 @@ export interface PaymentItem {
   status: string
   voterName: string | null
   voterEmail: string | null
-  sourcePlatform: string | null
   date: string
   createdAt: string
 }
@@ -414,32 +410,12 @@ export async function getPublicParticipant(participantId: string): Promise<Parti
   return apiFetch(`/public/participants/${participantId}`)
 }
 
-// ─── Social Router ───────────────────────────────────────────────
-
-export interface SocialPlatformItem {
-  platform: string
-  status: string
-  lastSync: string | null
-  detail: string | null
-  participants: number
-}
-
-export interface SocialSyncStatus {
-  platforms: SocialPlatformItem[]
-  lastSyncedAt: string | null
-}
-
-export async function getSocialPlatforms(): Promise<{ syncStatus: SocialSyncStatus }> {
-  return apiFetch('/social-router')
-}
-
 // ─── Public API (no auth required) ──────────────────────────────
 
 export interface PublicParticipant {
   id: string
   name: string
   category: string
-  platform: string
   videoUrl: string
   imageUrl: string | null
   thumbnailUrl: string | null
@@ -515,7 +491,6 @@ export async function initiatePayment(data: {
   voterPhone?: string
   voterName?: string
   voterEmail?: string
-  sourcePlatform?: string
   competitionId?: string
   idempotencyKey: string
 }): Promise<{ payment: PaymentItem & { pollUrl: string | null; paynowRedirectUrl: string | null }; idempotent: boolean }> {
@@ -550,15 +525,6 @@ export async function getActivity(): Promise<unknown> {
 
 export async function getNotifications(): Promise<unknown> {
   return apiFetch('/notifications')
-}
-
-// ─── Share ───────────────────────────────────────────────────────
-
-export async function shareParticipant(participantId: string, platform: string): Promise<unknown> {
-  return apiFetch('/share', {
-    method: 'POST',
-    body: JSON.stringify({ participantId, platform }),
-  })
 }
 
 // ─── Compare ─────────────────────────────────────────────────────

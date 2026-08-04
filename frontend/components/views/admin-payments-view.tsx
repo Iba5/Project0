@@ -51,7 +51,6 @@ type PaymentWithParticipant = PaymentItem & {
     id: string
     name: string
     category: string
-    platform: string
   } | null
 }
 
@@ -59,21 +58,21 @@ const PAGE_SIZE = 10
 
 function paymentStatusBadge(status: string) {
   switch (status) {
-    case 'Completed':
-    case 'Paid':
+    case 'completed':
+    case 'paid':
       return (
         <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/30">
           Paid
         </Badge>
       )
-    case 'Pending':
-    case 'Created':
+    case 'pending':
+    case 'created':
       return (
         <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 hover:bg-amber-500/30">
           Pending
         </Badge>
       )
-    case 'Failed':
+    case 'failed':
       return (
         <Badge className="bg-red-500/20 text-red-400 border-red-500/30 hover:bg-red-500/30">
           Failed
@@ -84,18 +83,18 @@ function paymentStatusBadge(status: string) {
   }
 }
 
-function normalizeStatus(status: string): 'Paid' | 'Pending' | 'Failed' | 'Other' {
+function normalizeStatus(status: string): 'paid' | 'pending' | 'failed' | 'other' {
   switch (status) {
-    case 'Completed':
-    case 'Paid':
-      return 'Paid'
-    case 'Pending':
-    case 'Created':
-      return 'Pending'
-    case 'Failed':
-      return 'Failed'
+    case 'completed':
+    case 'paid':
+      return 'paid'
+    case 'pending':
+    case 'created':
+      return 'pending'
+    case 'failed':
+      return 'failed'
     default:
-      return 'Other'
+      return 'other'
   }
 }
 
@@ -245,9 +244,9 @@ export function AdminPaymentsView() {
   }
 
   const stats = useMemo(() => {
-    const paid = payments.filter((p) => normalizeStatus(p.status) === 'Paid')
-    const pending = payments.filter((p) => normalizeStatus(p.status) === 'Pending')
-    const failed = payments.filter((p) => normalizeStatus(p.status) === 'Failed')
+    const paid = payments.filter((p) => normalizeStatus(p.status) === 'paid')
+    const pending = payments.filter((p) => normalizeStatus(p.status) === 'pending')
+    const failed = payments.filter((p) => normalizeStatus(p.status) === 'failed')
     const totalRevenue = paid.reduce((sum, p) => sum + (p.amount || 0), 0)
     return {
       totalRevenue,
@@ -496,7 +495,6 @@ export function AdminPaymentsView() {
                           {p.contestant?.category && (
                             <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
                               {p.contestant.category}
-                              {p.contestant.platform ? ` · ${p.contestant.platform}` : ''}
                             </span>
                           )}
                         </div>
@@ -650,19 +648,11 @@ export function AdminPaymentsView() {
                   label="Contestant Category"
                   value={selected.contestant?.category || '—'}
                 />
-                <DetailField
-                  label="Contestant Platform"
-                  value={selected.contestant?.platform || '—'}
-                />
                 <DetailField label="Voter Name" value={selected.voterName || '—'} />
                 <DetailField label="Voter Email" value={selected.voterEmail || '—'} />
                 <DetailField
                   label="Voter Phone"
                   value={(selected as PaymentItem & { voterPhone?: string | null }).voterPhone || '—'}
-                />
-                <DetailField
-                  label="Source Platform"
-                  value={selected.sourcePlatform || '—'}
                 />
                 <DetailField
                   label="Payment Method"

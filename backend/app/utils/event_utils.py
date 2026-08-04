@@ -36,45 +36,45 @@ def get_computed_event_status(
     
     # Administrative states take precedence
     if event_status == EventStatus.DRAFT:
-        return "Draft"
+        return "draft"
     if event_status == EventStatus.CANCELLED:
-        return "Cancelled"
+        return "cancelled"
     if event_status == EventStatus.ARCHIVED:
-        return "Archived"
+        return "archived"
     
     # Only Published events get computed statuses
     if event_status != EventStatus.PUBLISHED:
-        return "Unknown"
+        return "unknown"
     
-    # If no dates are set, default to Published
+    # If no dates are set, default to published
     if not start_date or not end_date:
-        return "Published"
+        return "published"
     
     # Check if event hasn't started yet
     if now < start_date:
-        return "Upcoming"
+        return "upcoming"
     
     # Check if event has ended
     if now > end_date:
-        return "Completed"
+        return "completed"
     
     # Check registration period
     if registration_opens and registration_closes:
         if registration_opens <= now <= registration_closes:
-            return "Registration Open"
+            return "registration_open"
     
     # Check voting period
     if voting_opens and voting_closes:
         if voting_opens <= now <= voting_closes:
-            return "Voting Open"
+            return "voting_open"
         if now > voting_closes:
-            return "Voting Closed"
+            return "voting_closed"
     
-    # Default to Published if within event but no specific period
+    # Default to published if within event but no specific period
     if start_date <= now <= end_date:
-        return "Published"
+        return "published"
     
-    return "Unknown"
+    return "unknown"
 
 
 def validate_event_timeline(

@@ -88,10 +88,9 @@ import { useIsMobile } from '@/hooks/use-mobile'
 const participantSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters').max(100, 'Name must be less than 100 characters'),
   category: z.string().min(2, 'Category must be at least 2 characters').max(50, 'Category must be less than 50 characters'),
-  platform: z.string().min(1, 'Platform is required'),
   videoUrl: z.string().url('Video URL must be a valid URL').optional().or(z.literal('')),
   bio: z.string().max(500, 'Bio must be less than 500 characters').optional(),
-  status: z.string().default('Draft'),
+  status: z.string().default('draft'),
   imageUrl: z.string().optional(),
 })
 
@@ -100,27 +99,27 @@ type ParticipantFormValues = z.infer<typeof participantSchema>
 // Quick filter pill definitions
 const statusPills: { label: string; value: string }[] = [
   { label: 'All', value: 'all' },
-  { label: 'Approved', value: 'Approved' },
-  { label: 'Pending', value: 'Pending' },
-  { label: 'Submitted', value: 'Submitted' },
-  { label: 'Under Review', value: 'Under Review' },
-  { label: 'Rejected', value: 'Rejected' },
+  { label: 'Approved', value: 'approved' },
+  { label: 'Pending', value: 'pending' },
+  { label: 'Submitted', value: 'submitted' },
+  { label: 'Under Review', value: 'under_review' },
+  { label: 'Rejected', value: 'rejected' },
 ]
 
 function participantStatusBadge(status: string) {
-  const map: Record<string, { bg: string; text: string; border: string; dot: string }> = {
-    Approved: { bg: 'rgba(16,185,129,0.15)', text: '#10B981', border: 'rgba(16,185,129,0.3)', dot: '#10B981' },
-    Pending: { bg: 'rgba(245,158,11,0.15)', text: '#F59E0B', border: 'rgba(245,158,11,0.3)', dot: '#F59E0B' },
-    Submitted: { bg: 'rgba(56,189,248,0.15)', text: '#38BDF8', border: 'rgba(56,189,248,0.3)', dot: '#38BDF8' },
-    'Under Review': { bg: 'rgba(139,92,246,0.15)', text: '#8B5CF6', border: 'rgba(139,92,246,0.3)', dot: '#8B5CF6' },
-    Rejected: { bg: 'rgba(239,68,68,0.15)', text: '#EF4444', border: 'rgba(239,68,68,0.3)', dot: '#EF4444' },
-    Draft: { bg: 'rgba(148,163,184,0.15)', text: 'var(--text-muted)', border: 'rgba(148,163,184,0.3)', dot: 'var(--text-muted)' },
+  const map: Record<string, { bg: string; text: string; border: string; dot: string; label: string }> = {
+    approved: { bg: 'rgba(16,185,129,0.15)', text: '#10B981', border: 'rgba(16,185,129,0.3)', dot: '#10B981', label: 'Approved' },
+    pending: { bg: 'rgba(245,158,11,0.15)', text: '#F59E0B', border: 'rgba(245,158,11,0.3)', dot: '#F59E0B', label: 'Pending' },
+    submitted: { bg: 'rgba(56,189,248,0.15)', text: '#38BDF8', border: 'rgba(56,189,248,0.3)', dot: '#38BDF8', label: 'Submitted' },
+    under_review: { bg: 'rgba(139,92,246,0.15)', text: '#8B5CF6', border: 'rgba(139,92,246,0.3)', dot: '#8B5CF6', label: 'Under Review' },
+    rejected: { bg: 'rgba(239,68,68,0.15)', text: '#EF4444', border: 'rgba(239,68,68,0.3)', dot: '#EF4444', label: 'Rejected' },
+    draft: { bg: 'rgba(148,163,184,0.15)', text: 'var(--text-muted)', border: 'rgba(148,163,184,0.3)', dot: 'var(--text-muted)', label: 'Draft' },
   }
-  const s = map[status] || map.Draft
+  const s = map[status] || map.draft
   return (
     <Badge style={{ background: s.bg, color: s.text, borderColor: s.border }} className="border gap-1.5">
       <span className="w-1.5 h-1.5 rounded-full" style={{ background: s.dot }} />
-      {status}
+      {s.label}
     </Badge>
   )
 }
@@ -268,53 +267,28 @@ function ParticipantFormFields({
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label style={{ color: 'var(--text-muted)' }}>Category</Label>
-          <Select
-            value={form.watch('category')}
-            onValueChange={(val) => form.setValue('category', val)}
+      <div className="space-y-2">
+        <Label style={{ color: 'var(--text-muted)' }}>Category</Label>
+        <Select
+          value={form.watch('category')}
+          onValueChange={(val) => form.setValue('category', val)}
+        >
+          <SelectTrigger
+            className="rounded-xl border-none"
+            style={{ background: 'var(--surface-3)', color: 'var(--text-primary)' }}
           >
-            <SelectTrigger
-              className="rounded-xl border-none"
-              style={{ background: 'var(--surface-3)', color: 'var(--text-primary)' }}
-            >
-              <SelectValue placeholder="Select" />
-            </SelectTrigger>
-            <SelectContent style={{ background: 'var(--surface-elevated)', color: 'var(--text-primary)' }}>
-              <SelectItem value="Singing">Singing</SelectItem>
-              <SelectItem value="Dancing">Dancing</SelectItem>
-              <SelectItem value="Comedy">Comedy</SelectItem>
-              <SelectItem value="Other">Other</SelectItem>
-            </SelectContent>
-          </Select>
-          {form.formState.errors.category && (
-            <p className="text-xs text-red-400">{form.formState.errors.category.message}</p>
-          )}
-        </div>
-        <div className="space-y-2">
-          <Label style={{ color: 'var(--text-muted)' }}>Platform</Label>
-          <Select
-            value={form.watch('platform')}
-            onValueChange={(val) => form.setValue('platform', val)}
-          >
-            <SelectTrigger
-              className="rounded-xl border-none"
-              style={{ background: 'var(--surface-3)', color: 'var(--text-primary)' }}
-            >
-              <SelectValue placeholder="Select" />
-            </SelectTrigger>
-            <SelectContent style={{ background: 'var(--surface-elevated)', color: 'var(--text-primary)' }}>
-              <SelectItem value="TikTok">TikTok</SelectItem>
-              <SelectItem value="Facebook">Facebook</SelectItem>
-              <SelectItem value="Instagram">Instagram</SelectItem>
-              <SelectItem value="YouTube">YouTube</SelectItem>
-            </SelectContent>
-          </Select>
-          {form.formState.errors.platform && (
-            <p className="text-xs text-red-400">{form.formState.errors.platform.message}</p>
-          )}
-        </div>
+            <SelectValue placeholder="Select" />
+          </SelectTrigger>
+          <SelectContent style={{ background: 'var(--surface-elevated)', color: 'var(--text-primary)' }}>
+            <SelectItem value="Singing">Singing</SelectItem>
+            <SelectItem value="Dancing">Dancing</SelectItem>
+            <SelectItem value="Comedy">Comedy</SelectItem>
+            <SelectItem value="Other">Other</SelectItem>
+          </SelectContent>
+        </Select>
+        {form.formState.errors.category && (
+          <p className="text-xs text-red-400">{form.formState.errors.category.message}</p>
+        )}
       </div>
 
       <div className="space-y-2">
@@ -352,12 +326,12 @@ function ParticipantFormFields({
             <SelectValue placeholder="Select" />
           </SelectTrigger>
           <SelectContent style={{ background: 'var(--surface-elevated)', color: 'var(--text-primary)' }}>
-            <SelectItem value="Draft">Draft</SelectItem>
-            <SelectItem value="Pending">Pending</SelectItem>
-            <SelectItem value="Submitted">Submitted</SelectItem>
-            <SelectItem value="Under Review">Under Review</SelectItem>
-            <SelectItem value="Approved">Approved</SelectItem>
-            <SelectItem value="Rejected">Rejected</SelectItem>
+            <SelectItem value="draft">Draft</SelectItem>
+            <SelectItem value="pending">Pending</SelectItem>
+            <SelectItem value="submitted">Submitted</SelectItem>
+            <SelectItem value="under_review">Under Review</SelectItem>
+            <SelectItem value="approved">Approved</SelectItem>
+            <SelectItem value="rejected">Rejected</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -443,10 +417,6 @@ function MobileParticipantCard({
                 {p.category}
               </span>
               <span className="text-xs" style={{ color: 'var(--border-subtle)' }}>·</span>
-              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                {p.platform}
-              </span>
-              <span className="text-xs" style={{ color: 'var(--border-subtle)' }}>·</span>
               <div className="flex items-center gap-1">
                 <Vote className="w-3 h-3" style={{ color: '#F59E0B' }} />
                 <span className="text-xs font-medium tabular-nums" style={{ color: '#F59E0B' }}>
@@ -459,7 +429,7 @@ function MobileParticipantCard({
 
         {/* Action buttons row */}
         <div className="flex items-center gap-2 mt-3 pt-3 border-t" style={{ borderColor: 'var(--border-subtle)' }}>
-          {(p.status === 'Submitted' || p.status === 'Under Review' || p.status === 'Pending') && (
+          {(p.status === 'submitted' || p.status === 'under_review' || p.status === 'pending') && (
             <Button
               variant="ghost"
               size="sm"
@@ -470,12 +440,12 @@ function MobileParticipantCard({
               Approve
             </Button>
           )}
-          {p.status !== 'Rejected' && p.status !== 'Approved' && (
+          {p.status !== 'rejected' && p.status !== 'approved' && (
             <Button
               variant="ghost"
               size="sm"
               className="h-8 px-2.5 text-xs gap-1.5 hover:bg-red-500/10"
-              onClick={() => onStatusChange(p.id, 'Rejected')}
+              onClick={() => onStatusChange(p.id, 'rejected')}
             >
               <XCircle className="w-3.5 h-3.5" style={{ color: '#EF4444' }} />
               Reject
@@ -529,7 +499,7 @@ export function AdminParticipantsView() {
   const router = useRouter()
   const isMobile = useIsMobile()
   const { adminUser } = useAppStore()
-  const isSuperAdmin = adminUser?.role === 'Super Admin'
+  const isSuperAdmin = adminUser?.role === 'super_admin'
   const [participants, setParticipants] = useState<ParticipantItem[]>([])
   const [totalCount, setTotalCount] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -592,10 +562,9 @@ export function AdminParticipantsView() {
     defaultValues: {
       name: '',
       category: '',
-      platform: '',
       videoUrl: '',
       bio: '',
-      status: 'Draft',
+      status: 'draft',
       imageUrl: '',
     },
   })
@@ -606,10 +575,9 @@ export function AdminParticipantsView() {
     defaultValues: {
       name: '',
       category: '',
-      platform: '',
       videoUrl: '',
       bio: '',
-      status: 'Draft',
+      status: 'draft',
       imageUrl: '',
     },
   })
@@ -660,7 +628,6 @@ export function AdminParticipantsView() {
     editForm.reset({
       name: p.name,
       category: p.category,
-      platform: p.platform,
       videoUrl: p.videoUrl,
       bio: p.bio || '',
       status: p.status,
@@ -700,7 +667,7 @@ export function AdminParticipantsView() {
   }
 
   const handleApprove = async (id: string) => {
-    await handleStatusChange(id, 'Approved')
+    await handleStatusChange(id, 'approved')
   }
 
   const handleCheatMode = (p: ParticipantItem) => {
@@ -1008,7 +975,6 @@ export function AdminParticipantsView() {
                 </TableHead>
                 <TableHead style={{ color: 'var(--text-muted)' }} className="w-[280px]">Name</TableHead>
                 <TableHead style={{ color: 'var(--text-muted)' }} className="w-[120px]">Category</TableHead>
-                <TableHead style={{ color: 'var(--text-muted)' }} className="w-[120px]">Platform</TableHead>
                 <TableHead style={{ color: 'var(--text-muted)' }} className="w-[140px]">Status</TableHead>
                 <TableHead style={{ color: 'var(--text-muted)' }} className="w-[110px]">Votes</TableHead>
                 <TableHead style={{ color: 'var(--text-muted)' }} className="text-right">Actions</TableHead>
@@ -1017,14 +983,14 @@ export function AdminParticipantsView() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-12" style={{ color: 'var(--text-muted)' }}>
+                  <TableCell colSpan={6} className="text-center py-12" style={{ color: 'var(--text-muted)' }}>
                     <Loader2 className="w-5 h-5 animate-spin inline-block mr-2" style={{ color: '#F59E0B' }} />
                     Loading participants…
                   </TableCell>
                 </TableRow>
               ) : participants.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-16">
+                  <TableCell colSpan={6} className="text-center py-16">
                     <div className="flex flex-col items-center gap-3">
                       <div
                         className="w-14 h-14 rounded-full flex items-center justify-center"
@@ -1085,7 +1051,6 @@ export function AdminParticipantsView() {
                         </div>
                       </TableCell>
                       <TableCell style={{ color: 'var(--text-muted)' }}>{p.category}</TableCell>
-                      <TableCell style={{ color: 'var(--text-muted)' }}>{p.platform}</TableCell>
                       <TableCell>{participantStatusBadge(p.status)}</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1.5" style={{ color: 'var(--text-primary)' }}>
@@ -1096,7 +1061,7 @@ export function AdminParticipantsView() {
                       <TableCell>
                         <div className="flex gap-1 justify-end">
                           {/* Approve button for Submitted/Under Review/Pending */}
-                          {(p.status === 'Submitted' || p.status === 'Under Review' || p.status === 'Pending') && (
+                          {(p.status === 'submitted' || p.status === 'under_review' || p.status === 'pending') && (
                             <ActionTooltip label="Approve">
                               <Button
                                 variant="ghost"
@@ -1109,13 +1074,13 @@ export function AdminParticipantsView() {
                             </ActionTooltip>
                           )}
                           {/* Reject button for non-rejected */}
-                          {p.status !== 'Rejected' && p.status !== 'Approved' && (
+                          {p.status !== 'rejected' && p.status !== 'approved' && (
                             <ActionTooltip label="Reject">
                               <Button
                                 variant="ghost"
                                 size="icon"
                                 className="h-8 w-8 hover:bg-red-500/10"
-                                onClick={() => handleStatusChange(p.id, 'Rejected')}
+                                onClick={() => handleStatusChange(p.id, 'rejected')}
                               >
                                 <XCircle className="w-4 h-4" style={{ color: '#EF4444' }} />
                               </Button>

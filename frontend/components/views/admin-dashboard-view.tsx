@@ -311,58 +311,66 @@ function buildSparkline(
 function eventStatusBadge(status: string) {
   const map: Record<
     string,
-    { bg: string; text: string; border: string; dot: string }
+    { bg: string; text: string; border: string; dot: string; label: string }
   > = {
-    Draft: {
+    draft: {
       bg: 'rgba(100,116,139,0.18)',
       text: '#CBD5E1',
       border: 'rgba(100,116,139,0.4)',
       dot: '#94A3B8',
+      label: 'Draft',
     },
-    Upcoming: {
+    upcoming: {
       bg: 'rgba(56,189,248,0.18)',
       text: '#7DD3FC',
       border: 'rgba(56,189,248,0.4)',
       dot: '#38BDF8',
+      label: 'Upcoming',
     },
-    'Voting Open': {
+    voting_open: {
       bg: 'rgba(16,185,129,0.18)',
       text: '#6EE7B7',
       border: 'rgba(16,185,129,0.4)',
       dot: '#10B981',
+      label: 'Voting Open',
     },
-    'Registration Open': {
+    registration_open: {
       bg: 'rgba(16,185,129,0.18)',
       text: '#6EE7B7',
       border: 'rgba(16,185,129,0.4)',
       dot: '#10B981',
+      label: 'Registration Open',
     },
-    'Voting Closed': {
+    voting_closed: {
       bg: 'rgba(245,158,11,0.18)',
       text: '#FCD34D',
       border: 'rgba(245,158,11,0.4)',
       dot: '#F59E0B',
+      label: 'Voting Closed',
     },
-    Completed: {
+    completed: {
       bg: 'rgba(82,82,91,0.18)',
       text: '#D4D4D8',
       border: 'rgba(82,82,91,0.4)',
       dot: '#A1A1AA',
+      label: 'Completed',
     },
-    Cancelled: {
+    cancelled: {
       bg: 'rgba(239,68,68,0.18)',
       text: '#FCA5A5',
       border: 'rgba(239,68,68,0.4)',
       dot: '#EF4444',
+      label: 'Cancelled',
     },
-    Ongoing: {
+    ongoing: {
       bg: 'rgba(16,185,129,0.18)',
       text: '#6EE7B7',
       border: 'rgba(16,185,129,0.4)',
       dot: '#10B981',
+      label: 'Ongoing',
     },
   }
-  const s = map[status] || map.Draft
+  const s = map[status] || map.draft
   return (
     <Badge
       style={{
@@ -376,7 +384,7 @@ function eventStatusBadge(status: string) {
         className="w-1.5 h-1.5 rounded-full"
         style={{ background: s.dot }}
       />
-      {status}
+      {s.label}
     </Badge>
   )
 }
@@ -522,21 +530,21 @@ function PaymentMethodsTooltip({
 
 function paymentStatusBadge(status: string) {
   switch (status) {
-    case 'Completed':
-    case 'Paid':
+    case 'completed':
+    case 'paid':
       return (
         <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/30">
           Paid
         </Badge>
       )
-    case 'Pending':
-    case 'Created':
+    case 'pending':
+    case 'created':
       return (
         <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 hover:bg-amber-500/30">
           Pending
         </Badge>
       )
-    case 'Failed':
+    case 'failed':
       return (
         <Badge className="bg-red-500/20 text-red-400 border-red-500/30 hover:bg-red-500/30">
           Failed
@@ -1319,15 +1327,15 @@ export function AdminDashboardView() {
                               className="h-full rounded-full"
                               style={{
                                 background:
-                                  event.status === 'Voting Open' ||
-                                  event.status === 'Registration Open' ||
-                                  event.status === 'Ongoing'
+                                  event.status === 'voting_open' ||
+                                  event.status === 'registration_open' ||
+                                  event.status === 'ongoing'
                                     ? 'linear-gradient(90deg, #10B981, #34D399)'
-                                    : event.status === 'Upcoming'
+                                    : event.status === 'upcoming'
                                       ? 'linear-gradient(90deg, #38BDF8, #60A5FA)'
-                                      : event.status === 'Completed'
+                                      : event.status === 'completed'
                                         ? 'linear-gradient(90deg, #71717A, #A1A1AA)'
-                                        : event.status === 'Voting Closed'
+                                        : event.status === 'voting_closed'
                                           ? 'linear-gradient(90deg, #F59E0B, #FBBF24)'
                                           : 'linear-gradient(90deg, #94A3B8, #CBD5E1)',
                               }}

@@ -50,7 +50,6 @@ interface CompareParticipant {
   id: string
   name: string
   category: string
-  platform: string
   imageUrl: string | null
   thumbnailUrl: string | null
   bio: string | null

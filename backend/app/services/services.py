@@ -11,8 +11,7 @@ from app.models.models import (
     PaymentMethodConfig, TestPayment
 )
 from app.enums.enums import (
-    UserRole, ContestantStatus, PaymentStatus,
-    SocialPlatform as PlatformEnum
+    UserRole, EventStatus, ContestantStatus, PaymentStatus
 )
 from app.repositories.repositories import (
     UserRepository, EventRepository, ParticipantRepository,
@@ -275,7 +274,7 @@ class AuthService:
         invitation_token_expires = datetime.now(timezone.utc) + timedelta(days=7)
 
         new_user = User(
-            name="Pending",
+            name="pending",
             email=invitation_request.email,
             hashed_password="",
             role=invitation_request.role,
@@ -845,17 +844,17 @@ class ParticipantService:
 
     def list_participants(
         self, search: Optional[str] = None, status: Optional[ContestantStatus] = None,
-        platform: Optional[PlatformEnum] = None, competition_id: Optional[str] = None,
+        competition_id: Optional[str] = None,
         offset: int = 0, limit: int = 100
     ) -> Tuple[List[Participant], int]:
         # If no competition_id provided, get all participants
         if not competition_id:
             return self.part_repo.get_all_participants(search, status, offset, limit)
-        return self.part_repo.search_and_filter(search, status, platform, competition_id, offset, limit)
+        return self.part_repo.search_and_filter(search, status, competition_id, offset, limit)
 
     async def list_public_participants_cached(
         self, search: Optional[str] = None, status: Optional[ContestantStatus] = None,
-        platform: Optional[PlatformEnum] = None, competition_id: Optional[str] = None,
+        competition_id: Optional[str] = None,
         offset: int = 0, limit: int = 100
     ) -> Tuple[List[Participant], int]:
         """
@@ -863,10 +862,10 @@ class ParticipantService:
         Cache key includes search parameters for proper invalidation.
         """
         from app.core.cache import get_cache_service, get_cache_key, CACHE_TTL, CACHE_PREFIXES
-        
+
         # Skip caching for searches or custom parameters (too many combinations)
-        if search or platform or status or offset != 0 or limit != 100:
-            return self.list_participants(search, status, platform, competition_id, offset, limit)
+        if search or status or offset != 0 or limit != 100:
+            return self.list_participants(search, status, competition_id, offset, limit)
         
         try:
             cache_service = get_cache_service()
@@ -883,18 +882,18 @@ class ParticipantService:
                 return cached_data['items'], cached_data['total']
             
             # Cache miss - fetch from database
-            items, total = self.list_participants(search, status, platform, competition_id, offset, limit)
-            
+            items, total = self.list_participants(search, status, competition_id, offset, limit)
+
             # Store in cache (synchronous)
             cache_service.set(cache_key, {'items': items, 'total': total}, CACHE_TTL['MEDIUM'])
             logger.info(f"Cache miss and set for public participants: {cache_key}")
-            
+
             return items, total
-            
+
         except Exception as e:
             logger.error(f"Cache error for public participants, falling back to DB: {e}")
             # Fallback to database query on cache failure
-            return self.list_participants(search, status, platform, competition_id, offset, limit)
+            return self.list_participants(search, status, competition_id, offset, limit)
 
     def get_participant(self, part_id: str) -> Optional[Participant]:
         part = self.part_repo.get_by_id(part_id)
@@ -906,7 +905,6 @@ class ParticipantService:
         new_part = Participant(
             name=part_in.name,
             category=part_in.category,
-            platform=part_in.platform,
             video_url=part_in.video_url,
             image_url=part_in.image_url,
             bio=part_in.bio,
@@ -923,8 +921,8 @@ class ParticipantService:
             details=f"Created contestant: {saved.name} ({saved.id})"
         )
         
-        # Invalidate cache after participant creation
-        self._invalidate_participant_cache_async(saved.id, saved.competition_id)
+        # TODO: Re-enable async cache invalidation when event loop is properly configured
+        # self._invalidate_participant_cache_async(saved.id, saved.competition_id)
         
         return saved
 
@@ -944,8 +942,8 @@ class ParticipantService:
             details=f"Contestant status updated from {old_status.value} to {status.value} for {part.name} ({part.id})"
         )
         
-        # Invalidate cache after status change
-        self._invalidate_participant_cache_async(part_id, part.competition_id)
+        # TODO: Re-enable async cache invalidation when event loop is properly configured
+        # self._invalidate_participant_cache_async(part_id, part.competition_id)
         
         return part
 
@@ -962,8 +960,8 @@ class ParticipantService:
             details=f"Soft deleted contestant: {part.name} ({part.id})"
         )
         
-        # Invalidate cache after deletion
-        self._invalidate_participant_cache_async(part_id, part.competition_id)
+        # TODO: Re-enable async cache invalidation when event loop is properly configured
+        # self._invalidate_participant_cache_async(part_id, part.competition_id)
 
     def _invalidate_participant_cache_async(self, participant_id: str, competition_id: Optional[str] = None):
         """Async cache invalidation helper that doesn't block the main operation."""
@@ -1000,7 +998,6 @@ class ParticipantService:
                 "id": p.id,
                 "name": p.name,
                 "category": p.category,
-                "platform": p.platform.value,
                 "videoUrl": p.video_url,
                 "votes": p.votes,
                 "status": p.status.value,
@@ -1272,7 +1269,6 @@ class PaymentService:
             status="created",
             voter_phone=payment_in.voter_phone,
             voter_email=payment_in.voter_email,
-            source_platform=payment_in.source_platform,
             competition_id=comp_id,
             test_redirect_url=test_redirect_url,
             is_test_payment=True,
@@ -1329,7 +1325,6 @@ class PaymentService:
             status=PaymentStatus.CREATED,
             voter_phone=payment_in.voter_phone,
             voter_email=payment_in.voter_email,
-            source_platform=payment_in.source_platform,
             competition_id=comp_id,
             duplicate_vote_acknowledged=payment_in.acknowledge_duplicate,
         )
@@ -1340,7 +1335,7 @@ class PaymentService:
 
         # 12. Call Paynow SDK with SERVER-DETERMINED amount
         item_name = f"Vote for {part.name}"
-        voter_email = payment_in.voter_email or "voter@platform.com"
+        voter_email = payment_in.voter_email or "voter@example.com"
 
         try:
             if is_mobile:
@@ -1391,7 +1386,7 @@ class PaymentService:
             db=self.db,
             action="Payment Created",
             details=f"Payment reference {reference} initiated for contestant: {part.name} ({part.id}) "
-                    f"via {payment_in.payment_method}, src={payment_in.source_platform or 'direct'}"
+                    f"via {payment_in.payment_method}"
         )
 
         # Return response
@@ -1710,7 +1705,6 @@ class PaymentService:
                 "paymentMethod": p.payment_method,
                 "status": p.status,
                 "date": p.date,
-                "sourcePlatform": p.source_platform,
                 # NOTE: voter_phone and voter_email intentionally excluded
             }
             for p in payments
@@ -1726,7 +1720,7 @@ class PaymentService:
 class SettingsService:
     """
     Administrative customization settings service.
-    Writes audit records when platform preferences are changed.
+    Writes audit records when settings preferences are changed.
     """
     def __init__(self, db: Session, user_id: Optional[str] = None) -> None:
         self.db = db

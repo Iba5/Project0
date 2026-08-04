@@ -740,13 +740,6 @@ export default function ContestantDetailView({ participantId }: { participantId:
                   </div>
                 </a>
 
-                {/* External link hint */}
-                <div className="absolute bottom-4 right-4">
-                  <span className="glass rounded-full px-3 py-1 text-xs text-muted-foreground flex items-center gap-1">
-                    <ExternalLink className="size-3" />
-                    Watch on {participant.platform}
-                  </span>
-                </div>
               </div>
             </div>
           </motion.div>
@@ -889,11 +882,6 @@ export default function ContestantDetailView({ participantId }: { participantId:
                   <span className="text-sm font-medium">{participant.category}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Eye className="size-4 text-gold-500" />
-                  <span className="text-sm text-muted-foreground">Platform:</span>
-                  <span className="text-sm font-medium">{participant.platform}</span>
-                </div>
-                <div className="flex items-center gap-2">
                   <Calendar className="size-4 text-gold-500" />
                   <span className="text-sm text-muted-foreground">Joined:</span>
                   <span className="text-sm font-medium">
@@ -999,7 +987,6 @@ export default function ContestantDetailView({ participantId }: { participantId:
                 category={participant.category}
                 votes={participant.votes}
                 rank={rank ?? undefined}
-                platform={participant.platform}
                 bio={participant.bio}
                 imageUrl={participant.imageUrl}
                 thumbnailUrl={participant.thumbnailUrl}
@@ -1144,7 +1131,6 @@ export default function ContestantDetailView({ participantId }: { participantId:
                 category: participant.category,
                 votes: participant.votes,
                 rank: rank ?? undefined,
-                platform: participant.platform,
               }
             : undefined
         }

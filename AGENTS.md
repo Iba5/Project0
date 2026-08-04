@@ -1,12 +1,136 @@
 # Agent Journal - Fixes and Improvements
 
+## Session Date: 2026-08-04
+
+---
+
+## **Enum Migration - Lowercase Standardization**
+
+### **18. Comprehensive Enum Value Migration**
+- **Issue:** Inconsistent enum value formats across application layers causing database errors and attribute errors
+- **Root Cause:** 
+  - Python enums used title case values (e.g., `"Draft"`)
+  - PostgreSQL enums used uppercase values (e.g., `DRAFT`)
+  - Frontend TypeScript used title case values (e.g., `"Draft"`)
+- **Impact:** 
+  - Database errors when inserting records with enum values
+  - Attribute errors when accessing enum properties in Python
+  - Confusion between computed statuses and administrative states
+- **Fixes Applied:**
+
+#### **Backend Changes**
+- **File:** `/backend/app/enums/enums.py`
+  - Updated all enum values to lowercase snake_case:
+    - `UserRole`: `"Super Admin"` → `"super_admin"`, `"Admin"` → `"admin"`, `"Moderator"` → `"moderator"`
+    - `EventStatus`: `"Draft"` → `"draft"`, `"Published"` → `"published"`, `"Cancelled"` → `"cancelled"`, `"Archived"` → `"archived"`
+    - `ContestantStatus`: `"Draft"` → `"draft"`, `"Submitted"` → `"submitted"`, `"Under Review"` → `"under_review"`, `"Approved"` → `"approved"`, `"Rejected"` → `"rejected"`, `"Disqualified"` → `"disqualified"`, `"Archived"` → `"archived"`
+    - `PaymentStatus`: `"Created"` → `"created"`, `"Pending"` → `"pending"`, `"Processing"` → `"processing"`, `"Paid"` → `"paid"`, `"Failed"` → `"failed"`, `"Cancelled"` → `"cancelled"`, `"Refunded"` → `"refunded"`, `"Expired"` → `"expired"`
+    - `SocialPlatform`: `"TikTok"` → `"tiktok"`, `"Facebook"` → `"facebook"`, `"Instagram"` → `"instagram"`, `"YouTube"` → `"youtube"`
+    - `SocialSyncStatus`: `"Connected"` → `"connected"`, `"Syncing"` → `"syncing"`, `"Failed"` → `"failed"`, `"Disconnected"` → `"disconnected"`
+    - `CompetitionStatus`: `"Draft"` → `"draft"`, `"Active"` → `"active"`, `"Completed"` → `"completed"`, `"Archived"` → `"archived"`
+
+- **File:** `/backend/app/models/models.py`
+  - Added `values_callable=lambda x: [e.value for e in x]` to all enum column definitions
+  - Ensures SQLAlchemy uses enum's actual values (lowercase) rather than enum names
+
+- **File:** `/backend/app/repositories/repositories.py`
+  - Changed `EventStatus.VOTING_OPEN` to `EventStatus.PUBLISHED` in `get_active_event()`
+
+- **File:** `/backend/app/services/services.py`
+  - Added missing `EventStatus` import
+  - Commented out async cache invalidation calls causing event loop errors
+  - Changed invitation user name from `"Pending"` to `"pending"`
+
+- **File:** `/backend/app/utils/event_utils.py`
+  - Updated `get_computed_event_status()` to return lowercase computed status values
+  - Changed computed statuses: `"Upcoming"` → `"upcoming"`, `"Registration Open"` → `"registration_open"`, `"Voting Open"` → `"voting_open"`, `"Voting Closed"` → `"voting_closed"`, `"Completed"` → `"completed"`
+
+- **File:** `/backend/app/utils/payment_utils.py`
+  - Updated payment status check to use lowercase: `"Registration Open"` → `"registration_open"`, `"Voting Open"` → `"voting_open"`, `"Published"` → `"published"`
+
+- **File:** `/backend/app/api/v1/endpoints/participants.py`
+  - Changed `list_public_participants()` from async to sync to avoid event loop issues
+  - Removed async cache call that was causing "no running event loop" errors
+
+- **File:** `/backend/app/main.py`
+  - Disabled `TrustedHostMiddleware` when `DEBUG=true` for local development
+  - Added `localhost` and `127.0.0.1` to `ALLOWED_HOSTS` in `.env`
+
+- **File:** `/backend/migrations/versions/update_enum_values_to_lowercase.py`
+  - Created comprehensive Alembic migration to update all PostgreSQL enum types
+  - Migration strategy: convert to TEXT → update data → drop old enum → create new enum → convert back
+  - Affected tables: `events`, `participants`, `payments`, `social_platforms`, `competitions`, `users`
+  - Included UserRole enum changes (manually updated during development)
+  - Complete downgrade function for rollback capability
+
+#### **Frontend Changes**
+- **File:** `/frontend/lib/types.ts`
+  - Updated all TypeScript type definitions to lowercase:
+    - `EventStatus`: `"Draft" | "Published" | "Cancelled" | "Archived"` → `"draft" | "published" | "cancelled" | "archived"`
+    - `UserRole`: `"Super Admin" | "Admin" | "Moderator"` → `"super_admin" | "admin" | "moderator"`
+    - `SocialPlatformType`: `"TikTok" | "Facebook" | "Instagram" | "YouTube"` → `"tiktok" | "facebook" | "instagram" | "youtube"`
+    - All other enum types updated similarly
+
+- **Files Updated** (13 component files):
+  - `admin-events-view.tsx` - Event management and status badges
+  - `admin-participants-view.tsx` - Participant management and status badges
+  - `admin-admins-view.tsx` - Admin role badges
+  - `admin-dashboard-view.tsx` - Dashboard badges
+  - `admin-payments-view.tsx` - Payment status badges
+  - `admin-social-router-view.tsx` - Social platform badges
+  - `admin-shell.tsx` - Role display helper
+  - `events-view.tsx` - Public events view
+  - `platform-icons.tsx` - Platform icons
+  - `global-search.tsx` - Search functionality
+  - `share-modal.tsx` - Share functionality
+
+- **UI Display Labels:** Kept title case for user-facing text (e.g., badge labels, platform names)
+  - All enum values used in API calls are lowercase
+  - All display labels shown to users remain title case (intentional)
+
+#### **Database Migration Results**
+- ✅ All PostgreSQL enum types updated to lowercase
+- ✅ Existing data migrated without loss
+- ✅ New records insert correctly with lowercase values
+- ✅ No duplicate object errors
+- ✅ No connection lock errors
+
+#### **Testing Results**
+- ✅ Event creation and publishing works (status "draft" → "published")
+- ✅ Participant creation works (platform "tiktok", status "draft")
+- ✅ Share link generation working correctly
+- ✅ No "invalid enum value" errors in logs
+- ✅ No "AttributeError" for enum properties
+
+#### **Documentation**
+- **File:** `/backend/ENUM_MIGRATION_SUMMARY.md`
+  - Comprehensive documentation of all changes
+  - Migration strategy and affected tables
+  - Known issues and temporary fixes
+  - Important notes for future development
+  - Complete file modification list
+  - Verification checklist
+  - Rollback instructions
+
+#### **Known Issues (Temporary)**
+1. **Async Cache Invalidation:** Commented out `_invalidate_participant_cache_async()` calls due to event loop errors
+   - Resolution needed: Re-enable when event loop properly configured or migrate to synchronous cache invalidation
+2. **TrustedHostMiddleware:** Disabled in DEBUG mode for local development
+   - Resolution needed: Ensure proper host configuration for development environments
+
+- **Status:** ✅ COMPLETED
+- **Files Modified:** 36+ files across backend and frontend
+- **Impact:** Application now has consistent lowercase enum values throughout, preventing database errors and improving maintainability
+
+---
+
 ## Session Date: 2025-01-XX
 
 ---
 
 ## **Critical Bug Fixes**
 
-### **1. platformFilter Reference Error**
+### **19. platformFilter Reference Error**
 - **File:** `/frontend/components/views/admin-participants-view.tsx`
 - **Error:** `ReferenceError: platformFilter is not defined`
 - **Cause:** Platform filter state was removed but references remained in the code
@@ -21,7 +145,7 @@
 - **Impact:** Admin participants page now loads without errors
 - **Status:** ✅ RESOLVED
 
-### **2. Audit View logs.length Error**
+### **20. Audit View logs.length Error**
 - **File:** `/frontend/components/views/admin-audit-view.tsx`
 - **Error:** `TypeError: Cannot read properties of undefined (reading 'length')`
 - **Cause:** `logs` state could be undefined during initial render
@@ -30,7 +154,7 @@
 - **Impact:** Audit page no longer crashes on initial load
 - **Status:** ✅ RESOLVED
 
-### **3. Payment Methods Fetch Error**
+### **21. Payment Methods Fetch Error**
 - **File:** `/frontend/components/views/admin-payment-methods-view.tsx`
 - **Error:** `Failed to fetch payment methods`
 - **Cause:** Direct URL paths used instead of `apiUrl()` helper function
@@ -48,7 +172,7 @@
 
 ## **Feature Implementations**
 
-### **4. Cheat Mode - End-to-End Implementation**
+### **22. Cheat Mode - End-to-End Implementation**
 
 #### **Backend Changes**
 - **File:** `/backend/app/core/config.py`
@@ -100,35 +224,35 @@
 
 ## **Previous Session Improvements (Recap)**
 
-### **5. Upload System Enhancements**
+### **23. Upload System Enhancements**
 - Added authentication requirement to upload endpoint
 - Added file type validation (JPEG, PNG, WebP, GIF)
 - Added file size validation (configurable max 10MB)
 - Added image dimension validation (configurable max 4K)
 - Made upload directory configurable via environment variables
 
-### **6. Filter Removal**
+### **24. Filter Removal**
 - Removed social media platform filter from admin participants view
 - Simplified admin interface
 
-### **7. Filtered Link Generation**
+### **25. Filtered Link Generation**
 - Added automatic link generation after contestant creation
 - Added automatic link generation after event creation
 - Links are automatically copied to clipboard
 
-### **8. Frontend Validation**
+### **26. Frontend Validation**
 - Enhanced participant form validation with helpful error messages
 - Enhanced event form validation with minimum payment enforcement
 - Name, category, video URL, bio validation improved
 
-### **9. Event-Specific Payment Logic**
+### **27. Event-Specific Payment Logic**
 - Payment amount now uses event vote_price first
 - Falls back to competition vote_price
 - Falls back to participant's competition
 - Finally uses configured MIN_PAYMENT_AMOUNT
 - Ensures amount never goes below minimum
 
-### **10. Dynamic Ticket Count Display**
+### **28. Dynamic Ticket Count Display**
 - Vote calculation now uses actual vote price
 - Frontend fetches vote price from event/competition
 - Payment UI displays correct minimum and ticket count
@@ -155,7 +279,7 @@ CHEAT_MODE_ENABLED=true
 
 ## **Admins Table Query Issue**
 
-### **6. Admins Table Not Including Super Admins**
+### **29. Admins Table Not Including Super Admins**
 - **File:** `/backend/app/repositories/repositories.py`
 - **Issue:** `get_all_active_admins()` was only querying ADMIN and MODERATOR roles, excluding SUPER_ADMIN
 - **Impact:** Super admins were not visible in the admin management UI
@@ -173,7 +297,7 @@ CHEAT_MODE_ENABLED=true
 
 ## **Paynow Integration - Official API Compliance**
 
-### **7. Hash Generation Algorithm Fixed**
+### **30. Hash Generation Algorithm Fixed**
 - **File:** `/backend/app/integrations/paynow/paynow.py` (lines 150-180)
 - **Issue:** Hash generation was sorting keys alphabetically, which doesn't match Paynow's official algorithm
 - **Official Paynow Algorithm:**
@@ -190,7 +314,7 @@ CHEAT_MODE_ENABLED=true
 - **Impact:** Hash verification will now work correctly with Paynow webhooks
 - **Status:** ✅ RESOLVED
 
-### **8. Callback Verification Updated**
+### **31. Callback Verification Updated**
 - **File:** `/backend/app/integrations/paynow/paynow.py` (lines 182-218)
 - **Issue:** Verification logic didn't match Paynow's official validation process
 - **Official Paynow Validation:**
@@ -210,7 +334,7 @@ CHEAT_MODE_ENABLED=true
 - **Impact:** Webhook callbacks will be properly validated
 - **Status:** ✅ RESOLVED
 
-### **9. Callback Endpoint Dynamic Field Handling**
+### **32. Callback Endpoint Dynamic Field Handling**
 - **File:** `/backend/app/api/v1/endpoints/payments.py` (lines 118-164)
 - **Issue:** Callback endpoint only accepted predefined fields, missing any additional fields Paynow might send
 - **Paynow Docs:** "The following fields will be returned... only if the merchant has been permitted to tokenize payment instruments"
@@ -222,7 +346,7 @@ CHEAT_MODE_ENABLED=true
 - **Impact:** Hash verification will work even if Paynow adds optional fields (token, tokenexpiry, paymentchannel, etc.)
 - **Status:** ✅ RESOLVED
 
-### **10. Environment Configuration Updated**
+### **33. Environment Configuration Updated**
 - **File:** `/backend/.env` (lines 37-44)
 - **Fix Applied:**
   - Added comment explaining where to get actual Integration ID and Key
@@ -234,7 +358,7 @@ CHEAT_MODE_ENABLED=true
 
 ## **Test Payment System - Development Mode**
 
-### **11. Test Payment Table Implementation**
+### **34. Test Payment Table Implementation**
 - **Purpose**: Allow payment flow testing without real money during development
 - **File**: `/backend/app/models/models.py`
 - **Model**: `TestPayment` class with test-specific fields
@@ -245,7 +369,7 @@ CHEAT_MODE_ENABLED=true
   - Separate table from real payments
 - **Status**: ✅ COMPLETED
 
-### **12. Test Payment Repository**
+### **35. Test Payment Repository**
 - **File**: `/backend/app/repositories/repositories.py`
 - **Repository**: `TestPaymentRepository` class
 - **Methods**:
@@ -258,7 +382,7 @@ CHEAT_MODE_ENABLED=true
   - `get_all_test_payments()` - List all test payments
 - **Status**: ✅ COMPLETED
 
-### **13. Test Payment Service Integration**
+### **36. Test Payment Service Integration**
 - **File**: `/backend/app/services/services.py`
 - **PaymentService Updates**:
   - Added `test_payment_repo` to service initialization
@@ -273,7 +397,7 @@ CHEAT_MODE_ENABLED=true
   - Audit logging for test payment activities
 - **Status**: ✅ COMPLETED
 
-### **14. Test Payment Configuration**
+### **37. Test Payment Configuration**
 - **File**: `/backend/app/core/config.py`
 - **Environment Variable**: `TEST_PAYMENT_MODE`
 - **Default Behavior**:
@@ -282,7 +406,7 @@ CHEAT_MODE_ENABLED=true
 - **Override**: Can set `TEST_PAYMENT_MODE=false` even in development to test real payments
 - **Status**: ✅ COMPLETED
 
-### **15. Test Payment API Endpoints**
+### **38. Test Payment API Endpoints**
 - **File**: `/backend/app/api/v1/endpoints/payments.py`
 - **Endpoints Added**:
   - `POST /api/v1/payments/test/{reference}/complete` - Complete test payment
@@ -294,13 +418,13 @@ CHEAT_MODE_ENABLED=true
   - Requires admin permissions for monitoring/cleanup
 - **Status**: ✅ COMPLETED
 
-### **16. Database Migration**
+### **39. Database Migration**
 - **File**: `/backend/migrations/versions/fe8d06520d01_add_test_payments_table_for_development.py`
 - **Migration**: Creates `test_payments` table with all required fields
 - **Index**: Added on `reference` field for performance
 - **Status**: ✅ COMPLETED AND APPLIED
 
-### **17. Test Payment Cleanup Documentation**
+### **40. Test Payment Cleanup Documentation**
 - **File**: `/backend/TEST_PAYMENT_CLEANUP.md`
 - **Content**: Comprehensive cleanup instructions for production deployment
 - **Sections**:

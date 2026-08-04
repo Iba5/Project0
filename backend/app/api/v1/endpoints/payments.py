@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 from app.core.database import get_db
 from app.api.v1.dependencies import PermissionChecker, PaginationParams, get_current_active_user
-from app.enums.enums import Permission, ALLOWED_SOURCE_PLATFORMS
+from app.enums.enums import Permission
 from app.services.services import PaymentService, DashboardService
 from app.schemas.schemas import (
     PaymentCreate, PaymentResponse, 
@@ -61,15 +61,6 @@ def check_voter(
     ),
 )
 def initiate_payment(payment_in: PaymentCreate, request: Request, db: Session = Depends(get_db)):
-    # Track source_platform from URL query parameter if not in body
-    src = request.query_params.get("src")
-    if src and not payment_in.source_platform:
-        # Validate src against whitelist
-        if src.lower() in ALLOWED_SOURCE_PLATFORMS:
-            payment_in.source_platform = src.lower()
-        else:
-            logger.warning(f"Invalid source_platform query param: {src}")
-
     payment_service = PaymentService(db)
     # Read optional Idempotency-Key header from the client to persist and detect retries
     idempotency_key = request.headers.get("Idempotency-Key") or request.headers.get("Idempotency-Key".lower())
@@ -241,7 +232,6 @@ def complete_test_payment(
         status=PaymentStatus.PAID,
         voter_phone=test_payment.voter_phone,
         voter_email=test_payment.voter_email,
-        source_platform=test_payment.source_platform,
         competition_id=test_payment.competition_id,
         poll_url="test_mode",
         paynow_redirect_url=test_payment.test_redirect_url
@@ -321,7 +311,6 @@ def list_test_payments(
                 "status": tp.status,
                 "voter_phone": tp.voter_phone,
                 "voter_email": tp.voter_email,
-                "source_platform": tp.source_platform,
                 "competition_id": tp.competition_id,
                 "test_redirect_url": tp.test_redirect_url,
                 "created_at": tp.created_at.isoformat() if tp.created_at else None,

@@ -98,7 +98,7 @@ def validate_payment_eligibility(
     )
     
     # Allow payments during Registration Open or Voting Open
-    if computed_status not in ["Registration Open", "Voting Open", "Published"]:
+    if computed_status not in ["registration_open", "voting_open", "published"]:
         raise HTTPException(
             status_code=403,
             detail=f"Payments are not currently accepted. Event status: {computed_status}"

@@ -990,7 +990,6 @@ export default function LeaderboardView() {
                 category: shareParticipant.category,
                 votes: shareParticipant.votes,
                 rank: leaderboard.findIndex((e) => e.id === shareParticipant.id) + 1,
-                platform: shareParticipant.platform,
               }
             : undefined
         }

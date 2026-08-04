@@ -46,19 +46,19 @@ type InviteFormValues = z.infer<typeof inviteSchema>
 
 function roleBadge(role: string) {
   switch (role) {
-    case 'Super Admin':
+    case 'super_admin':
       return (
         <Badge className="gap-1" style={{ background: 'rgba(245,158,11,0.15)', color: '#F59E0B', borderColor: 'rgba(245,158,11,0.3)' }}>
           <ShieldAlert className="w-3 h-3" /> Super Admin
         </Badge>
       )
-    case 'Admin':
+    case 'admin':
       return (
         <Badge className="gap-1" style={{ background: 'rgba(56,189,248,0.15)', color: '#38BDF8', borderColor: 'rgba(56,189,248,0.3)' }}>
           <ShieldCheck className="w-3 h-3" /> Admin
         </Badge>
       )
-    case 'Moderator':
+    case 'moderator':
       return (
         <Badge className="gap-1" style={{ background: 'rgba(168,85,247,0.15)', color: '#A855F7', borderColor: 'rgba(168,85,247,0.3)' }}>
           <Shield className="w-3 h-3" /> Moderator
@@ -97,7 +97,7 @@ export function AdminAdminsView() {
 
   const form = useForm<InviteFormValues>({
     resolver: zodResolver(inviteSchema),
-    defaultValues: { name: '', email: '', role: 'Admin' },
+    defaultValues: { name: '', email: '', role: 'admin' },
   })
 
   const onSubmit = async (values: InviteFormValues) => {
@@ -304,9 +304,9 @@ export function AdminAdminsView() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent style={{ background: 'var(--surface-elevated)', color: 'var(--text-primary)' }}>
-                  <SelectItem value="Admin">Admin</SelectItem>
-                  <SelectItem value="Super Admin">Super Admin</SelectItem>
-                  <SelectItem value="Moderator">Moderator</SelectItem>
+                  <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="super_admin">Super Admin</SelectItem>
+                  <SelectItem value="moderator">Moderator</SelectItem>
                 </SelectContent>
               </Select>
             </div>

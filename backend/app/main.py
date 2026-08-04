@@ -91,8 +91,9 @@ sio_app = socketio.ASGIApp(socketio_server=sio, socketio_path="")
 # Parse allowed hosts from comma-separated env var
 _allowed_hosts = [h.strip() for h in settings.ALLOWED_HOSTS.split(",") if h.strip()]
 
-# 1. Trusted Hosts
-app.add_middleware(TrustedHostMiddleware, allowed_hosts=_allowed_hosts)
+# 1. Trusted Hosts (disabled for local testing)
+if not settings.DEBUG:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=_allowed_hosts)
 
 # Parse CORS origins from comma-separated env var
 _cors_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]

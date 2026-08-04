@@ -4,8 +4,7 @@ from pydantic import BaseModel, EmailStr, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
 from app.enums.enums import (
     UserRole, EventStatus, ContestantStatus, PaymentStatus, 
-    SocialPlatform, SocialSyncStatus, CompetitionStatus, SourcePlatform,
-    ALLOWED_SOURCE_PLATFORMS, PaymentMethod, PaymentMethodType
+    CompetitionStatus, PaymentMethod, PaymentMethodType
 )
 
 T = TypeVar("T")
@@ -194,7 +193,6 @@ class EventResponse(EventBase):
 class ParticipantBase(CamelModel):
     name: str
     category: str
-    platform: SocialPlatform
     video_url: Optional[str] = None  # Optional promotional video
     image_url: Optional[str] = None  # Profile picture
     bio: Optional[str] = None  # Biography
@@ -225,7 +223,6 @@ class PaymentCreate(CamelModel):
     payment_method: str
     voter_phone: str = Field(..., min_length=8, max_length=15, description="Voter phone number (required)")
     voter_email: Optional[str] = None
-    source_platform: Optional[str] = None
     competition_id: Optional[str] = None
     acknowledge_duplicate: bool = False
 
@@ -237,16 +234,6 @@ class PaymentCreate(CamelModel):
         if not cleaned.isdigit() or len(cleaned) < 8:
             raise ValueError("Invalid phone number format")
         return cleaned
-
-    @field_validator('source_platform')
-    @classmethod
-    def validate_source_platform(cls, v: Optional[str]) -> Optional[str]:
-        """Strictly validate source_platform against whitelist."""
-        if v is not None and v.strip().lower() not in ALLOWED_SOURCE_PLATFORMS:
-            raise ValueError(
-                f"Invalid source_platform. Allowed: {', '.join(sorted(ALLOWED_SOURCE_PLATFORMS))}"
-            )
-        return v.strip().lower() if v else None
 
 
 class PaymentResponse(CamelModel):
@@ -307,15 +294,6 @@ class ActivityResponse(CamelModel):
     title: str
     detail: Optional[str] = None
     time: datetime
-
-# --- Social Platform Sync Schemas ---
-
-class SocialPlatformResponse(CamelModel):
-    id: str
-    platform: SocialPlatform
-    status: SocialSyncStatus = SocialSyncStatus.DISCONNECTED
-    last_sync: Optional[datetime] = None
-    detail: Optional[str] = None
 
 # --- Dashboard Schemas ---
 
