@@ -8,6 +8,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import {
   Search,
   Plus,
+  CheckCircle,
   Filter,
   Copy,
   Eye,
@@ -371,6 +372,7 @@ function MobileParticipantCard({
   onViewPublic,
   onCheatMode,
   isSuperAdmin,
+  events,
 }: {
   participant: ParticipantItem
   index: number
@@ -380,6 +382,7 @@ function MobileParticipantCard({
   onViewPublic: (p: ParticipantItem) => void
   onCheatMode: (p: ParticipantItem) => void
   isSuperAdmin: boolean
+  events: EventItem[]
 }) {
   const p = participant
 
@@ -408,6 +411,10 @@ function MobileParticipantCard({
             <div className="flex items-center gap-3 mt-1.5">
               <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
                 {p.category}
+              </span>
+              <span className="text-xs" style={{ color: 'var(--border-subtle)' }}>·</span>
+              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                {p.eventId ? (events.find(e => e.id === p.eventId)?.name || 'Unknown Event') : 'No Event'}
               </span>
               <span className="text-xs" style={{ color: 'var(--border-subtle)' }}>·</span>
               <div className="flex items-center gap-1">
@@ -768,7 +775,7 @@ export function AdminParticipantsView() {
   }
 
   const handleBulkApprove = () => runBulkAction('approve', 'approved')
-  const handleBulkReject = () => runBulkAction('reject', 'rejected')
+  const handleBulkDisqualify = () => runBulkAction('disqualify', 'disqualified')
 
   const handleBulkDelete = async () => {
     setBulkDeleteOpen(false)
@@ -953,6 +960,7 @@ export function AdminParticipantsView() {
                 </TableHead>
                 <TableHead style={{ color: 'var(--text-muted)' }} className="w-[280px]">Name</TableHead>
                 <TableHead style={{ color: 'var(--text-muted)' }} className="w-[120px]">Category</TableHead>
+                <TableHead style={{ color: 'var(--text-muted)' }} className="w-[140px]">Event</TableHead>
                 <TableHead style={{ color: 'var(--text-muted)' }} className="w-[140px]">Status</TableHead>
                 <TableHead style={{ color: 'var(--text-muted)' }} className="w-[110px]">Votes</TableHead>
                 <TableHead style={{ color: 'var(--text-muted)' }} className="text-right">Actions</TableHead>
@@ -961,14 +969,14 @@ export function AdminParticipantsView() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-12" style={{ color: 'var(--text-muted)' }}>
+                  <TableCell colSpan={7} className="text-center py-12" style={{ color: 'var(--text-muted)' }}>
                     <Loader2 className="w-5 h-5 animate-spin inline-block mr-2" style={{ color: '#F59E0B' }} />
                     Loading participants…
                   </TableCell>
                 </TableRow>
               ) : participants.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-16">
+                  <TableCell colSpan={7} className="text-center py-16">
                     <div className="flex flex-col items-center gap-3">
                       <div
                         className="w-14 h-14 rounded-full flex items-center justify-center"
@@ -1029,6 +1037,15 @@ export function AdminParticipantsView() {
                         </div>
                       </TableCell>
                       <TableCell style={{ color: 'var(--text-muted)' }}>{p.category}</TableCell>
+                      <TableCell style={{ color: 'var(--text-muted)' }}>
+                        {p.eventId ? (
+                          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                            {events.find(e => e.id === p.eventId)?.name || 'Unknown Event'}
+                          </span>
+                        ) : (
+                          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>No Event</span>
+                        )}
+                      </TableCell>
                       <TableCell>{participantStatusBadge(p.status)}</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1.5" style={{ color: 'var(--text-primary)' }}>
@@ -1148,6 +1165,7 @@ export function AdminParticipantsView() {
                   onViewPublic={handleViewPublic}
                   onCheatMode={handleCheatMode}
                   isSuperAdmin={isSuperAdmin}
+                  events={events}
                 />
               ))
             )}
@@ -1212,21 +1230,21 @@ export function AdminParticipantsView() {
               </Button>
               <Button
                 size="sm"
-                onClick={handleBulkReject}
+                onClick={handleBulkDisqualify}
                 disabled={bulkLoading !== null}
                 className="rounded-full gap-1.5 h-9"
                 style={{
-                  background: 'rgba(245,158,11,0.15)',
-                  color: '#F59E0B',
-                  border: '1px solid rgba(245,158,11,0.35)',
+                  background: 'rgba(239,68,68,0.15)',
+                  color: '#EF4444',
+                  border: '1px solid rgba(239,68,68,0.35)',
                 }}
               >
-                {bulkLoading === 'reject' ? (
+                {bulkLoading === 'disqualify' ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 ) : (
                   <XCircle className="w-3.5 h-3.5" />
                 )}
-                Reject Selected
+                Disqualify Selected
               </Button>
               <Button
                 size="sm"

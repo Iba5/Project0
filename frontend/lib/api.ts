@@ -276,7 +276,6 @@ export interface ParticipantItem {
   bio: string | null
   status: string
   votes: number
-  competitionId: string | null
   eventId: string | null
   createdAt: string
   deletedAt: string | null
