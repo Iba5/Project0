@@ -6,7 +6,7 @@ export default function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // Skip proxy check for public admin paths
-  if (PUBLIC_ADMIN_PATHS.some(p => pathname === p || pathname.startsWith(p + '/'))) || pathname === '/admin/login') {
+  if (PUBLIC_ADMIN_PATHS.some(p => pathname === p || pathname.startsWith(p + '/'))) {
     return NextResponse.next()
   }
 
