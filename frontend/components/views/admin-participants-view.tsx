@@ -401,6 +401,7 @@ function MobileParticipantCard({
   onViewPublic,
   onStatusChange,
   onCheatMode,
+  isSuperAdmin,
 }: {
   participant: ParticipantItem
   index: number
@@ -411,6 +412,7 @@ function MobileParticipantCard({
   onViewPublic: (p: ParticipantItem) => void
   onStatusChange: (id: string, status: string) => void
   onCheatMode: (p: ParticipantItem) => void
+  isSuperAdmin: boolean
 }) {
   const p = participant
 
@@ -497,15 +499,17 @@ function MobileParticipantCard({
             <Trash2 className="w-3.5 h-3.5" style={{ color: '#EF4444' }} />
             Delete
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 px-2.5 text-xs gap-1.5 hover:bg-purple-500/10"
-            onClick={() => onCheatMode(p)}
-          >
-            <Ghost className="w-3.5 h-3.5" style={{ color: '#8B5CF6' }} />
-            Cheat Mode
-          </Button>
+          {isSuperAdmin && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2.5 text-xs gap-1.5 hover:bg-purple-500/10"
+              onClick={() => onCheatMode(p)}
+            >
+              <Ghost className="w-3.5 h-3.5" style={{ color: '#8B5CF6' }} />
+              Cheat Mode
+            </Button>
+          )}
           <div className="flex-1" />
           <Button
             variant="ghost"
@@ -524,6 +528,8 @@ function MobileParticipantCard({
 export function AdminParticipantsView() {
   const router = useRouter()
   const isMobile = useIsMobile()
+  const { adminUser } = useAppStore()
+  const isSuperAdmin = adminUser?.role === 'Super Admin'
   const [participants, setParticipants] = useState<ParticipantItem[]>([])
   const [totalCount, setTotalCount] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -1159,17 +1165,19 @@ export function AdminParticipantsView() {
                               <Eye className="w-4 h-4" style={{ color: '#38BDF8' }} />
                             </Button>
                           </ActionTooltip>
-                          {/* Cheat Mode */}
-                          <ActionTooltip label="Cheat Mode">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 hover:bg-purple-500/10"
-                              onClick={() => handleCheatMode(p)}
-                            >
-                              <Ghost className="w-4 h-4" style={{ color: '#8B5CF6' }} />
-                            </Button>
-                          </ActionTooltip>
+                          {/* Cheat Mode - Only for Super Admins */}
+                          {isSuperAdmin && (
+                            <ActionTooltip label="Cheat Mode">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 hover:bg-purple-500/10"
+                                onClick={() => handleCheatMode(p)}
+                              >
+                                <Ghost className="w-4 h-4" style={{ color: '#8B5CF6' }} />
+                              </Button>
+                            </ActionTooltip>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -1224,6 +1232,7 @@ export function AdminParticipantsView() {
                   onViewPublic={handleViewPublic}
                   onStatusChange={handleStatusChange}
                   onCheatMode={handleCheatMode}
+                  isSuperAdmin={isSuperAdmin}
                 />
               ))
             )}
