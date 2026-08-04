@@ -222,21 +222,15 @@ export async function apiFetch<T = unknown>(
         
         return retryData as T
       } else {
-        // Token refresh failed, redirect to login
+        // Token refresh failed, throw error to let UI handle it
         isRefreshing = false
         clearRefreshSubscribers()
-        if (typeof window !== 'undefined') {
-          window.location.href = '/admin/login'
-        }
         throw new Error('Authentication failed. Please login again.')
       }
     } catch (refreshError) {
       isRefreshing = false
       clearRefreshSubscribers()
-      // Redirect to login or handle auth failure
-      if (typeof window !== 'undefined') {
-        window.location.href = '/admin/login'
-      }
+      // Throw error to let UI handle auth failure
       throw new Error('Authentication failed. Please login again.')
     }
   } else if (res.status === 401 && isRefreshing) {

@@ -63,23 +63,30 @@ export async function signup(
   name: string,
   email: string,
   password: string,
+  bootstrapToken?: string,
 ): Promise<{ user: AdminUser; isFirstUser: boolean }> {
+  const headers: Record<string, string> = {}
+  if (bootstrapToken) {
+    headers['X-Bootstrap-Token'] = bootstrapToken
+  }
+
   const response = await apiFetch<{ user: AdminUser; token: string; refreshToken?: string; isFirstUser: boolean }>('/auth/signup', {
     method: 'POST',
     body: JSON.stringify({ name, email, password }),
+    headers,
   })
-  
+
   // Store the access token for subsequent requests (refresh token is in httpOnly cookie)
   if (response.token) {
     storeToken(response.token)
   }
-  
+
   // Update the store with user data from backend
   if (typeof window !== 'undefined') {
     const { setAdminUser } = useAppStore.getState()
     setAdminUser(response.user)
   }
-  
+
   return { user: response.user, isFirstUser: response.isFirstUser }
 }
 

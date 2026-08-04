@@ -23,6 +23,7 @@ function AdminLoginViewContent() {
   const [name, setName] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [bootstrapToken, setBootstrapToken] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
 
@@ -80,7 +81,7 @@ function AdminLoginViewContent() {
     }
     setLoading(true)
     try {
-      const { user, isFirstUser } = await signup(name, email, password)
+      const { user, isFirstUser } = await signup(name, email, password, bootstrapToken || undefined)
       // User state is now set in the API layer from backend response
       if (isFirstUser) {
         toast.success('Admin account created!', {
@@ -377,6 +378,33 @@ function AdminLoginViewContent() {
                     </button>
                   </div>
                 </div>
+
+                {!superAdminExists && (
+                  <div className="space-y-2">
+                    <Label htmlFor="bootstrap-token" style={{ color: 'var(--text-muted)' }}>
+                      Setup Token
+                    </Label>
+                    <div className="relative">
+                      <ShieldAlert className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: 'var(--text-muted)' }} />
+                      <Input
+                        id="bootstrap-token"
+                        type="text"
+                        placeholder="Enter setup token from backend"
+                        value={bootstrapToken}
+                        onChange={(e) => setBootstrapToken(e.target.value)}
+                        required={!superAdminExists}
+                        className="pl-10 rounded-xl border-none"
+                        style={{
+                          background: 'var(--surface-3)',
+                          color: 'var(--text-primary)',
+                        }}
+                      />
+                    </div>
+                    <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                      Required for first admin setup. Get this from your backend environment variables.
+                    </p>
+                  </div>
+                )}
 
                 <div className="space-y-2">
                   <Label htmlFor="signup-confirm" style={{ color: 'var(--text-muted)' }}>

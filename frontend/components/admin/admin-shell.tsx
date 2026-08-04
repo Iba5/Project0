@@ -81,12 +81,12 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
     try {
       await logout()
       setAdminUser(null)
-      router.push('/admin/login')
+      router.push('/')
       toast.success('Logged out successfully')
     } catch (error) {
       // Even if API call fails, clear local state and redirect
       setAdminUser(null)
-      router.push('/admin/login')
+      router.push('/')
       toast.error('Logout completed (may have API errors)')
     }
   }
