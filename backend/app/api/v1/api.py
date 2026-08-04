@@ -7,7 +7,8 @@ import logging
 
 from app.core.database import get_db
 from app.core.config import settings
-from app.api.v1.endpoints import auth, dashboard, events, participants, payments, settings, social, admins, competitions, payment_methods
+from app.api.v1.endpoints import auth, dashboard, events, participants, payments, social, admins, competitions, payment_methods
+from app.api.v1.endpoints import settings as settings_router
 from app.repositories.repositories import ParticipantRepository, EventRepository, PaymentRepository, AuditLogRepository
 from app.api.v1.dependencies import PermissionChecker, get_current_active_user
 from app.enums.enums import Permission
@@ -23,7 +24,7 @@ api_router.include_router(events.router, prefix="/events", tags=["events"])
 api_router.include_router(participants.router, prefix="/participants", tags=["participants"])
 api_router.include_router(payments.router, prefix="/payments", tags=["payments"])
 api_router.include_router(competitions.router, prefix="/competitions", tags=["competitions"])
-api_router.include_router(settings.router, prefix="/settings", tags=["settings"])
+api_router.include_router(settings_router.router, prefix="/settings", tags=["settings"])
 api_router.include_router(social.router, prefix="/social-router", tags=["social-router"])
 api_router.include_router(admins.router, prefix="/admins", tags=["admins"])
 api_router.include_router(payment_methods.router, prefix="/payment-methods", tags=["payment-methods"])

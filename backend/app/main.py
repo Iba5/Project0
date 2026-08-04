@@ -21,6 +21,23 @@ from app.core.errors import app_error_handler
 # Validate critical secrets at import time (fails fast before any route is registered)
 settings.validate_secrets()
 
+# Validate that settings object has expected configuration fields
+# This prevents silent overwrites from import collisions
+expected_settings = [
+    'PROJECT_NAME',
+    'API_V1_STR',
+    'DATABASE_URL',
+    'REDIS_URL',
+    'JWT_SECRET_KEY',
+    'ALLOWED_IMAGE_TYPES',
+    'MAX_UPLOAD_SIZE',
+    'MAX_IMAGE_DIMENSION',
+    'UPLOAD_DIR',
+]
+for field in expected_settings:
+    if not hasattr(settings, field):
+        raise RuntimeError(f"Configuration validation failed: settings object missing expected field '{field}'. This may indicate an import collision where settings was overwritten by another module.")
+
 # Setup application start time for health uptime calculation
 APP_START_TIME = time.time()
 
