@@ -124,11 +124,14 @@ export default function AdminPaymentMethodsView() {
       const response = await fetch(apiUrl('/payment-methods'), {
         credentials: 'include',
       })
-      if (!response.ok) throw new Error('Failed to fetch payment methods')
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error?.detail || 'Failed to fetch payment methods')
+      }
       const data = await response.json()
       setPaymentMethods(data)
     } catch (error) {
-      toast.error('Failed to load payment methods')
+      toast.error(error instanceof Error ? error.message : 'Failed to load payment methods')
       console.error(error)
     } finally {
       setLoading(false)
