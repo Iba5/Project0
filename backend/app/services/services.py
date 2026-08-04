@@ -667,8 +667,6 @@ class EventService:
             voting_opens=event_in.voting_opens,
             voting_closes=event_in.voting_closes,
             public_leaderboard=event_in.public_leaderboard,
-            allowed_platforms=event_in.allowed_platforms,
-            allowed_categories=event_in.allowed_categories,
             require_contestant_approval=event_in.require_contestant_approval,
             competition_id=event_in.competition_id,
         )

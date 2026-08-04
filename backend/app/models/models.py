@@ -108,8 +108,6 @@ class Event(Base):
     voting_opens: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     voting_closes: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     public_leaderboard: Mapped[bool] = mapped_column(Boolean, default=True)
-    allowed_platforms: Mapped[Optional[str]] = mapped_column(String, default="TikTok,Facebook,Instagram,YouTube")
-    allowed_categories: Mapped[Optional[str]] = mapped_column(String, default="Singing,Dancing,Comedy")
     require_contestant_approval: Mapped[bool] = mapped_column(Boolean, default=True)
 
     # Foreign key to Competition (nullable for backward compatibility)

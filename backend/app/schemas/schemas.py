@@ -156,8 +156,6 @@ class EventBase(CamelModel):
     voting_opens: Optional[datetime] = None
     voting_closes: Optional[datetime] = None
     public_leaderboard: bool = True
-    allowed_platforms: str = "TikTok,Facebook,Instagram,YouTube"
-    allowed_categories: str = "Singing,Dancing,Comedy"
     require_contestant_approval: bool = True
 
 class EventCreate(EventBase):
