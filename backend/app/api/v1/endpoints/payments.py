@@ -174,7 +174,8 @@ async def paynow_callback(
 def list_payments(pagination: PaginationParams = Depends(), db: Session = Depends(get_db)):
     payment_service = PaymentService(db)
     items, total = payment_service.list_payments(pagination.offset, pagination.limit)
-    return paginate_response(items, total, pagination.page, pagination.page_size)
+    # Return format matching frontend expectation
+    return {"payments": items, "total": total}
 
 
 # =============================================================================

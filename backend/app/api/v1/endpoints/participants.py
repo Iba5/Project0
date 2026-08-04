@@ -61,7 +61,8 @@ def list_participants(
         search, status, platform, competition_id,
         pagination.offset, pagination.limit
     )
-    return paginate_response(items, total, pagination.page, pagination.page_size)
+    # Return format matching frontend expectation
+    return {"participants": items, "total": total}
 
 
 # C4 FIX: /leaderboard, /compare, /bulk MUST be registered before /{part_id}

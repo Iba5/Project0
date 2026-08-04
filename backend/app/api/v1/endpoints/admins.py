@@ -29,7 +29,7 @@ allow_manage_admins = Depends(PermissionChecker(Permission.ADMINS_MANAGE))
 def list_admins(db: Session = Depends(get_db)):
     user_repo = UserRepository(db)
     admins = user_repo.get_all_active_admins()
-    
+
     admin_list = [
         UserResponse(
             id=admin.id,
@@ -39,6 +39,7 @@ def list_admins(db: Session = Depends(get_db)):
         )
         for admin in admins
     ]
+    # Return format matching frontend expectation
     return {"admins": [a.model_dump(by_alias=True) for a in admin_list]}
 
 
