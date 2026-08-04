@@ -12,8 +12,38 @@ from app.services.services import EventService, ParticipantService
 from app.schemas.schemas import EventResponse, ParticipantResponse
 from app.enums.enums import EventStatus
 from app.utils.event_utils import get_computed_event_status
+from app.api.v1.dependencies import PaginationParams
+from app.repositories.repositories import paginate_response
 
 router = APIRouter()
+
+
+@router.get(
+    "/events",
+    summary="List all public events",
+    description="Get list of all published events"
+)
+def list_public_events(pagination: PaginationParams = Depends(), db: Session = Depends(get_db)):
+    """Get all published events."""
+    event_service = EventService(db)
+    items, total = event_service.list_events(pagination.offset, pagination.limit)
+    
+    # Filter to only published events
+    published_events = [event for event in items if event.status == EventStatus.PUBLISHED]
+    
+    # Add computed status to each event
+    for event in published_events:
+        event.computed_status = get_computed_event_status(
+            event.status,
+            event.start_date,
+            event.end_date,
+            event.registration_opens,
+            event.registration_closes,
+            event.voting_opens,
+            event.voting_closes,
+        )
+    
+    return paginate_response(published_events, len(published_events), pagination.page, pagination.page_size)
 
 
 @router.get(

@@ -344,7 +344,7 @@ export default function EventsView() {
       setLoading(true)
       setError(null)
       try {
-        const { events: fetched } = await listPublicEvents()
+        const { items: fetched } = await listPublicEvents()
         if (!cancelled) {
           // Hide internal "Draft" events from the public browser.
           const visible = (fetched || []).filter(

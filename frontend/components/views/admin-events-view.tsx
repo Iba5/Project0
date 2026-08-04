@@ -347,7 +347,7 @@ export function AdminEventsView() {
       const params: { search?: string; status?: string } = {}
       if (search.trim()) params.search = search.trim()
       if (statusFilter && statusFilter !== 'all') params.status = statusFilter
-      const { events: evts } = await listEvents(params)
+      const { items: evts } = await listEvents(params)
       setEvents(evts || [])
     } catch {
       toast.error('Failed to fetch events')

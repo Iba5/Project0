@@ -528,7 +528,7 @@ export function AdminParticipantsView() {
       if (search) params.search = search
       if (statusFilter && statusFilter !== 'all') params.status = statusFilter
 
-      const { participants: pts } = await listParticipants(params)
+      const { items: pts } = await listParticipants(params)
       setParticipants(pts)
     } catch {
       toast.error('Failed to fetch participants')

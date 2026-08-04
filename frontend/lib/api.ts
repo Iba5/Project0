@@ -225,7 +225,7 @@ export interface ListEventsParams {
   status?: string
 }
 
-export async function listEvents(params?: ListEventsParams): Promise<{ events: EventItem[] }> {
+export async function listEvents(params?: ListEventsParams): Promise<{ items: EventItem[]; pagination: any }> {
   const searchParams = new URLSearchParams()
   if (params?.search) searchParams.set('search', params.search)
   if (params?.status) searchParams.set('status', params.status)
@@ -233,8 +233,8 @@ export async function listEvents(params?: ListEventsParams): Promise<{ events: E
   return apiFetch(`/events${qs ? `?${qs}` : ''}`)
 }
 
-export async function listPublicEvents(): Promise<{ events: EventItem[] }> {
-  return apiFetch('/events')
+export async function listPublicEvents(): Promise<{ items: EventItem[]; pagination: any }> {
+  return apiFetch('/public/events')
 }
 
 export async function getEvent(id: string): Promise<EventItem> {
@@ -290,7 +290,7 @@ export interface ListParticipantsParams {
   category?: string
 }
 
-export async function listParticipants(params?: ListParticipantsParams): Promise<{ participants: ParticipantItem[] }> {
+export async function listParticipants(params?: ListParticipantsParams): Promise<{ items: ParticipantItem[]; pagination: any }> {
   const searchParams = new URLSearchParams()
   if (params?.search) searchParams.set('search', params.search)
   if (params?.status) searchParams.set('status', params.status)

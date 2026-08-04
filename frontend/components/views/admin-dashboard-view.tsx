@@ -654,9 +654,9 @@ export function AdminDashboardView() {
         if (pmtsRes.status === 'fulfilled')
           setPayments(pmtsRes.value.payments || [])
         if (partsRes.status === 'fulfilled')
-          setParticipants(partsRes.value.participants || [])
+          setParticipants(partsRes.value.items || [])
         if (eventsRes.status === 'fulfilled')
-          setEvents(eventsRes.value.events || [])
+          setEvents(eventsRes.value.items || [])
       })
       .finally(() => {
         if (!cancelled) {
