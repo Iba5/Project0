@@ -8,8 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.enums.enums import (
-    UserRole, EventStatus, ContestantStatus, PaymentStatus,
-    CompetitionStatus
+    UserRole, EventStatus, ContestantStatus, PaymentStatus
 )
 
 
@@ -55,33 +54,6 @@ class User(Base):
     audit_logs: Mapped[List["AuditLog"]] = relationship("AuditLog", back_populates="user")
 
 
-class Competition(Base):
-    """
-    Competition entity that groups Events, Contestants, Votes and Transactions.
-    All voting operations are scoped to the active competition.
-    """
-    __tablename__ = "competitions"
-
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    name: Mapped[str] = mapped_column(String, nullable=False, index=True)  # Index for search
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    status: Mapped[CompetitionStatus] = mapped_column(Enum(CompetitionStatus, values_callable=lambda x: [e.value for e in x]), default=CompetitionStatus.DRAFT, nullable=False, index=True)  # Index for status filtering
-    start_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)  # Index for date queries
-    end_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)  # Index for date queries
-    # C5 FIX: Numeric for monetary values — Float causes precision corruption
-    # (e.g. 0.1 + 0.2 = 0.30000000000000004)
-    vote_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("1.00"), nullable=False)
-    votes_per_payment: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
-    currency: Mapped[str] = mapped_column(String, default="USD", nullable=False)
-    public_leaderboard: Mapped[bool] = mapped_column(Boolean, default=True)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=False, index=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)  # Index for date queries
-    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-
-    events: Mapped[List["Event"]] = relationship("Event", back_populates="competition")
-    participants: Mapped[List["Participant"]] = relationship("Participant", back_populates="competition")
-
-
 class Event(Base):
     """
     Event model representing active/upcoming digital entertainment competitions.
@@ -113,10 +85,6 @@ class Event(Base):
     share_link: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # Internal shareable link
     event_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # Unique event ID for public links
 
-    # Foreign key to Competition (nullable for backward compatibility)
-    competition_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("competitions.id"), nullable=True, index=True)
-    competition: Mapped[Optional["Competition"]] = relationship("Competition", back_populates="events")
-    
     # Relationship to participants
     participants: Mapped[List["Participant"]] = relationship("Participant", back_populates="event")
 
@@ -134,7 +102,7 @@ class Participant(Base):
     video_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # Optional promotional video
     image_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # Profile picture
     bio: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Biography
-    status: Mapped[ContestantStatus] = mapped_column(Enum(ContestantStatus, values_callable=lambda x: [e.value for e in x]), default=ContestantStatus.DRAFT, nullable=False, index=True)  # Index for status filtering
+    status: Mapped[ContestantStatus] = mapped_column(Enum(ContestantStatus, values_callable=lambda x: [e.value for e in x]), default=ContestantStatus.APPROVED, nullable=False, index=True)  # Index for status filtering
     votes: Mapped[int] = mapped_column(Integer, default=0, index=True)  # Index for leaderboard sorting
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)  # Index for date queries
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)  # Soft delete field
@@ -174,8 +142,8 @@ class Payment(Base):
     voter_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)                # Name of actual voter (if proxy)
     voter_email: Mapped[Optional[str]] = mapped_column(String, nullable=True)               # Email of actual voter (if proxy)
 
-    # Competition scoping
-    competition_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("competitions.id"), nullable=True, index=True)
+    # Event scoping
+    event_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("events.id"), nullable=True, index=True)
 
     # Warning acknowledgement (for duplicate voters)
     duplicate_vote_acknowledged: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

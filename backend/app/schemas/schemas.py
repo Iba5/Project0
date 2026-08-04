@@ -4,7 +4,7 @@ from pydantic import BaseModel, EmailStr, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
 from app.enums.enums import (
     UserRole, EventStatus, ContestantStatus, PaymentStatus, 
-    CompetitionStatus, PaymentMethod, PaymentMethodType
+    PaymentMethod, PaymentMethodType
 )
 
 T = TypeVar("T")
@@ -101,41 +101,6 @@ class AdminInvitationResponse(CamelModel):
 class InvalidateAdminRequest(CamelModel):
     admin_id: str
 
-# --- Competition Schemas ---
-
-class CompetitionBase(CamelModel):
-    name: str
-    description: Optional[str] = None
-    status: CompetitionStatus = CompetitionStatus.DRAFT
-    start_date: Optional[datetime] = None
-    end_date: Optional[datetime] = None
-    vote_price: float = 1.0
-    votes_per_payment: int = 1
-    currency: str = "USD"
-    public_leaderboard: bool = True
-
-class CompetitionCreate(CompetitionBase):
-    pass
-
-# L9 FIX: Update schemas use Optional fields so PUT can be partial
-class CompetitionUpdate(CamelModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    status: Optional[CompetitionStatus] = None
-    start_date: Optional[datetime] = None
-    end_date: Optional[datetime] = None
-    vote_price: Optional[float] = None
-    votes_per_payment: Optional[int] = None
-    currency: Optional[str] = None
-    public_leaderboard: Optional[bool] = None
-
-class CompetitionResponse(CompetitionBase):
-    id: str
-    is_active: bool
-
-class CompetitionSetActivate(CamelModel):
-    competition_id: str
-
 # --- Event Schemas ---
 
 class EventBase(CamelModel):
@@ -196,7 +161,7 @@ class ParticipantBase(CamelModel):
     video_url: Optional[str] = None  # Optional promotional video
     image_url: Optional[str] = None  # Profile picture
     bio: Optional[str] = None  # Biography
-    status: ContestantStatus = ContestantStatus.DRAFT
+    status: ContestantStatus = ContestantStatus.APPROVED
     votes: int = 0
     event_id: str  # Required for participant creation
 
@@ -219,12 +184,12 @@ class PaymentBase(CamelModel):
 class PaymentCreate(CamelModel):
     contestant_id: str
     # BUG 5 FIX: `amount` removed. The server determines the payment
-    # amount from Competition.vote_price. Client-supplied amounts are
+    # amount from Event.vote_price. Client-supplied amounts are
     # ignored to prevent price manipulation (e.g. amount=0.01).
     payment_method: str
     voter_phone: str = Field(..., min_length=8, max_length=15, description="Voter phone number (required)")
     voter_email: Optional[str] = None
-    competition_id: Optional[str] = None
+    event_id: Optional[str] = None
     acknowledge_duplicate: bool = False
 
     @field_validator('voter_phone')

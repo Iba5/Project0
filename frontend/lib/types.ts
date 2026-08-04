@@ -18,13 +18,8 @@ export type ComputedEventStatus =
   | "completed"
 
 export type ContestantStatus =
-  | "draft"
-  | "submitted"
-  | "under_review"
   | "approved"
-  | "rejected"
   | "disqualified"
-  | "archived"
 
 export type PaymentStatus =
   | "created"
@@ -89,7 +84,7 @@ export type ParticipantRecord = {
   bio: string | null
   status: ContestantStatus
   votes: number
-  eventId: string | null
+  eventId: string
   competitionId: string | null
 }
 

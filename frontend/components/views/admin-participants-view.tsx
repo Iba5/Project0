@@ -8,8 +8,6 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import {
   Search,
   Plus,
-  CheckCircle,
-  XCircle,
   Filter,
   Copy,
   Eye,
@@ -32,8 +30,10 @@ import {
   updateParticipant,
   bulkUpdateParticipants,
   manipulateVotes,
+  listEvents,
   type ParticipantItem,
   type BulkParticipantAction,
+  type EventItem,
 } from '@/lib/api'
 import { Checkbox } from '@/components/ui/checkbox'
 import { uploadImage } from '@/lib/upload-api'
@@ -90,7 +90,7 @@ const participantSchema = z.object({
   category: z.string().min(2, 'Category must be at least 2 characters').max(50, 'Category must be less than 50 characters'),
   videoUrl: z.string().url('Video URL must be a valid URL').optional().or(z.literal('')),
   bio: z.string().max(500, 'Bio must be less than 500 characters').optional(),
-  status: z.string().default('draft'),
+  eventId: z.string().min(1, 'Event is required'),
   imageUrl: z.string().optional(),
 })
 
@@ -100,22 +100,15 @@ type ParticipantFormValues = z.infer<typeof participantSchema>
 const statusPills: { label: string; value: string }[] = [
   { label: 'All', value: 'all' },
   { label: 'Approved', value: 'approved' },
-  { label: 'Pending', value: 'pending' },
-  { label: 'Submitted', value: 'submitted' },
-  { label: 'Under Review', value: 'under_review' },
-  { label: 'Rejected', value: 'rejected' },
+  { label: 'Disqualified', value: 'disqualified' },
 ]
 
 function participantStatusBadge(status: string) {
   const map: Record<string, { bg: string; text: string; border: string; dot: string; label: string }> = {
     approved: { bg: 'rgba(16,185,129,0.15)', text: '#10B981', border: 'rgba(16,185,129,0.3)', dot: '#10B981', label: 'Approved' },
-    pending: { bg: 'rgba(245,158,11,0.15)', text: '#F59E0B', border: 'rgba(245,158,11,0.3)', dot: '#F59E0B', label: 'Pending' },
-    submitted: { bg: 'rgba(56,189,248,0.15)', text: '#38BDF8', border: 'rgba(56,189,248,0.3)', dot: '#38BDF8', label: 'Submitted' },
-    under_review: { bg: 'rgba(139,92,246,0.15)', text: '#8B5CF6', border: 'rgba(139,92,246,0.3)', dot: '#8B5CF6', label: 'Under Review' },
-    rejected: { bg: 'rgba(239,68,68,0.15)', text: '#EF4444', border: 'rgba(239,68,68,0.3)', dot: '#EF4444', label: 'Rejected' },
-    draft: { bg: 'rgba(148,163,184,0.15)', text: 'var(--text-muted)', border: 'rgba(148,163,184,0.3)', dot: 'var(--text-muted)', label: 'Draft' },
+    disqualified: { bg: 'rgba(239,68,68,0.15)', text: '#EF4444', border: 'rgba(239,68,68,0.3)', dot: '#EF4444', label: 'Disqualified' },
   }
-  const s = map[status] || map.draft
+  const s = map[status] || { bg: 'rgba(148,163,184,0.15)', text: 'var(--text-muted)', border: 'rgba(148,163,184,0.3)', dot: 'var(--text-muted)', label: status }
   return (
     <Badge style={{ background: s.bg, color: s.text, borderColor: s.border }} className="border gap-1.5">
       <span className="w-1.5 h-1.5 rounded-full" style={{ background: s.dot }} />
@@ -127,8 +120,10 @@ function participantStatusBadge(status: string) {
 // Shared form fields used by both Create and Edit dialogs
 function ParticipantFormFields({
   form,
+  availableEvents,
 }: {
   form: UseFormReturn<ParticipantFormValues>
+  availableEvents?: EventItem[]
 }) {
   const [uploading, setUploading] = useState(false)
   // imagePreview takes precedence (local data URL during upload), otherwise falls back to form imageUrl
@@ -292,6 +287,31 @@ function ParticipantFormFields({
       </div>
 
       <div className="space-y-2">
+        <Label style={{ color: 'var(--text-muted)' }}>Event</Label>
+        <Select
+          value={form.watch('eventId')}
+          onValueChange={(val) => form.setValue('eventId', val)}
+        >
+          <SelectTrigger
+            className="rounded-xl border-none"
+            style={{ background: 'var(--surface-3)', color: 'var(--text-primary)' }}
+          >
+            <SelectValue placeholder="Select event" />
+          </SelectTrigger>
+          <SelectContent style={{ background: 'var(--surface-elevated)', color: 'var(--text-primary)' }}>
+            {availableEvents?.map((event) => (
+              <SelectItem key={event.id} value={event.id}>
+                {event.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {form.formState.errors.eventId && (
+          <p className="text-xs text-red-400">{form.formState.errors.eventId.message}</p>
+        )}
+      </div>
+
+      <div className="space-y-2">
         <Label style={{ color: 'var(--text-muted)' }}>Video URL (Optional)</Label>
         <Input
           {...form.register('videoUrl')}
@@ -311,29 +331,6 @@ function ParticipantFormFields({
           className="rounded-xl border-none"
           style={{ background: 'var(--surface-3)', color: 'var(--text-primary)' }}
         />
-      </div>
-
-      <div className="space-y-2">
-        <Label style={{ color: 'var(--text-muted)' }}>Status</Label>
-        <Select
-          value={form.watch('status')}
-          onValueChange={(val) => form.setValue('status', val)}
-        >
-          <SelectTrigger
-            className="rounded-xl border-none"
-            style={{ background: 'var(--surface-3)', color: 'var(--text-primary)' }}
-          >
-            <SelectValue placeholder="Select" />
-          </SelectTrigger>
-          <SelectContent style={{ background: 'var(--surface-elevated)', color: 'var(--text-primary)' }}>
-            <SelectItem value="draft">Draft</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="submitted">Submitted</SelectItem>
-            <SelectItem value="under_review">Under Review</SelectItem>
-            <SelectItem value="approved">Approved</SelectItem>
-            <SelectItem value="rejected">Rejected</SelectItem>
-          </SelectContent>
-        </Select>
       </div>
     </>
   )
@@ -368,23 +365,19 @@ function ActionTooltip({
 function MobileParticipantCard({
   participant,
   index,
-  onApprove,
   onEdit,
   onDelete,
   onCopyLink,
   onViewPublic,
-  onStatusChange,
   onCheatMode,
   isSuperAdmin,
 }: {
   participant: ParticipantItem
   index: number
-  onApprove: (id: string) => void
   onEdit: (p: ParticipantItem) => void
   onDelete: (p: ParticipantItem) => void
   onCopyLink: (p: ParticipantItem) => void
   onViewPublic: (p: ParticipantItem) => void
-  onStatusChange: (id: string, status: string) => void
   onCheatMode: (p: ParticipantItem) => void
   isSuperAdmin: boolean
 }) {
@@ -429,28 +422,6 @@ function MobileParticipantCard({
 
         {/* Action buttons row */}
         <div className="flex items-center gap-2 mt-3 pt-3 border-t" style={{ borderColor: 'var(--border-subtle)' }}>
-          {(p.status === 'submitted' || p.status === 'under_review' || p.status === 'pending') && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 px-2.5 text-xs gap-1.5 hover:bg-emerald-500/10"
-              onClick={() => onApprove(p.id)}
-            >
-              <CheckCircle className="w-3.5 h-3.5" style={{ color: '#10B981' }} />
-              Approve
-            </Button>
-          )}
-          {p.status !== 'rejected' && p.status !== 'approved' && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 px-2.5 text-xs gap-1.5 hover:bg-red-500/10"
-              onClick={() => onStatusChange(p.id, 'rejected')}
-            >
-              <XCircle className="w-3.5 h-3.5" style={{ color: '#EF4444' }} />
-              Reject
-            </Button>
-          )}
           <Button
             variant="ghost"
             size="sm"
@@ -501,6 +472,7 @@ export function AdminParticipantsView() {
   const { adminUser } = useAppStore()
   const isSuperAdmin = adminUser?.role === 'super_admin'
   const [participants, setParticipants] = useState<ParticipantItem[]>([])
+  const [events, setEvents] = useState<EventItem[]>([])
   const [totalCount, setTotalCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [formOpen, setFormOpen] = useState(false)
@@ -537,6 +509,21 @@ export function AdminParticipantsView() {
     }
   }, [search, statusFilter])
 
+  const fetchEvents = useCallback(async () => {
+    try {
+      const { items: evts } = await listEvents()
+      // Filter events where registration is still open
+      const registrationOpenEvents = evts.filter((event: EventItem) => {
+        const now = new Date()
+        const registrationCloses = event.registrationCloses ? new Date(event.registrationCloses) : null
+        return event.status === 'published' && (!registrationCloses || registrationCloses > now)
+      })
+      setEvents(registrationOpenEvents)
+    } catch {
+      toast.error('Failed to fetch events')
+    }
+  }, [])
+
   // Fetch the unfiltered total once on mount so we can show "X of Y"
   useEffect(() => {
     let cancelled = false
@@ -556,6 +543,10 @@ export function AdminParticipantsView() {
     fetchParticipants()
   }, [fetchParticipants])
 
+  useEffect(() => {
+    fetchEvents()
+  }, [fetchEvents])
+
   // Create form
   const createForm = useForm<ParticipantFormValues>({
     resolver: zodResolver(participantSchema) as any,
@@ -564,7 +555,7 @@ export function AdminParticipantsView() {
       category: '',
       videoUrl: '',
       bio: '',
-      status: 'draft',
+      eventId: '',
       imageUrl: '',
     },
   })
@@ -577,7 +568,7 @@ export function AdminParticipantsView() {
       category: '',
       videoUrl: '',
       bio: '',
-      status: 'draft',
+      eventId: '',
       imageUrl: '',
     },
   })
@@ -654,20 +645,6 @@ export function AdminParticipantsView() {
     } finally {
       setDeleting(false)
     }
-  }
-
-  const handleStatusChange = async (id: string, newStatus: string) => {
-    try {
-      await updateParticipant(id, { status: newStatus })
-      toast.success(`Participant ${newStatus.toLowerCase()}`)
-      fetchParticipants()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to update status')
-    }
-  }
-
-  const handleApprove = async (id: string) => {
-    await handleStatusChange(id, 'approved')
   }
 
   const handleCheatMode = (p: ParticipantItem) => {
@@ -1060,32 +1037,6 @@ export function AdminParticipantsView() {
                       </TableCell>
                       <TableCell>
                         <div className="flex gap-1 justify-end">
-                          {/* Approve button for Submitted/Under Review/Pending */}
-                          {(p.status === 'submitted' || p.status === 'under_review' || p.status === 'pending') && (
-                            <ActionTooltip label="Approve">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 hover:bg-emerald-500/10"
-                                onClick={() => handleApprove(p.id)}
-                              >
-                                <CheckCircle className="w-4 h-4" style={{ color: '#10B981' }} />
-                              </Button>
-                            </ActionTooltip>
-                          )}
-                          {/* Reject button for non-rejected */}
-                          {p.status !== 'rejected' && p.status !== 'approved' && (
-                            <ActionTooltip label="Reject">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 hover:bg-red-500/10"
-                                onClick={() => handleStatusChange(p.id, 'rejected')}
-                              >
-                                <XCircle className="w-4 h-4" style={{ color: '#EF4444' }} />
-                              </Button>
-                            </ActionTooltip>
-                          )}
                           {/* Edit Participant */}
                           <ActionTooltip label="Edit Participant">
                             <Button
@@ -1190,12 +1141,10 @@ export function AdminParticipantsView() {
                   key={p.id}
                   participant={p}
                   index={idx}
-                  onApprove={handleApprove}
                   onEdit={handleEditClick}
                   onDelete={setDeleteTarget}
                   onCopyLink={handleCopyParticipantLink}
                   onViewPublic={handleViewPublic}
-                  onStatusChange={handleStatusChange}
                   onCheatMode={handleCheatMode}
                   isSuperAdmin={isSuperAdmin}
                 />
@@ -1325,7 +1274,7 @@ export function AdminParticipantsView() {
             <DialogTitle style={{ color: 'var(--text-primary)' }}>Add Participant</DialogTitle>
           </DialogHeader>
           <form onSubmit={createForm.handleSubmit(onCreateSubmit)} className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
-            <ParticipantFormFields form={createForm} />
+            <ParticipantFormFields form={createForm} availableEvents={events} />
             <DialogFooter>
               <Button
                 type="submit"
@@ -1356,7 +1305,7 @@ export function AdminParticipantsView() {
             <DialogTitle style={{ color: 'var(--text-primary)' }}>Edit Participant</DialogTitle>
           </DialogHeader>
           <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
-            <ParticipantFormFields form={editForm} />
+            <ParticipantFormFields form={editForm} availableEvents={events} />
             <DialogFooter>
               <Button
                 type="submit"

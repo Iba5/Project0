@@ -4,12 +4,12 @@ from typing import Any, List, Optional, Tuple, Type, TypeVar, Generic
 from sqlalchemy.orm import Session,Query
 from app.models.models import (
     User, Event, Participant, Payment, Activity, 
-    Setting, VoteTransaction, AuditLog, Competition,
+    Setting, VoteTransaction, AuditLog,
     PaymentMethodConfig, TestPayment
 )
 from app.enums.enums import (
     EventStatus, ContestantStatus, 
-    UserRole, CompetitionStatus, PaymentStatus
+    UserRole, PaymentStatus
 )
 
 
@@ -108,24 +108,6 @@ class UserRepository(BaseRepository[User]):
         return query.all()
 
 
-class CompetitionRepository(BaseRepository[Competition]):
-    def __init__(self, db: Session):
-        super().__init__(Competition, db)
-
-    def get_active_competition(self) -> Optional[Competition]:
-        """Fetch the currently active competition."""
-        query = self.db.query(Competition).filter(Competition.is_active.is_(True))
-        if hasattr(Competition, "deleted_at"):
-            query = query.filter(Competition.deleted_at.is_(None))
-        return query.first()
-
-    def get_by_status(self, status: CompetitionStatus) -> List[Competition]:
-        query = self.db.query(Competition).filter(Competition.status == status)
-        if hasattr(Competition, "deleted_at"):
-            query = query.filter(Competition.deleted_at.is_(None))
-        return query.all()
-
-
 class EventRepository(BaseRepository[Event]):
     def __init__(self, db: Session):
         super().__init__(Event, db)
@@ -159,11 +141,11 @@ class ParticipantRepository(BaseRepository[Participant]):
         return query.all()
 
     def _filtered_query(
-    self,
-    search: str | None = None,
-    status: ContestantStatus | None = None,
-    competition_id: str | None = None,
-) -> Query[Participant]:
+        self,
+        search: str | None = None,
+        status: ContestantStatus | None = None,
+        event_id: str | None = None,
+    ) -> Query[Participant]:
         query = self._base_query()
         if search:
             # H5 FIX: Escape SQL LIKE wildcards (% and _) in user search input
@@ -176,16 +158,16 @@ class ParticipantRepository(BaseRepository[Participant]):
             )
         if status:
             query = query.filter(Participant.status == status)
-        if competition_id:
-            query = query.filter(Participant.competition_id == competition_id)
+        if event_id:
+            query = query.filter(Participant.event_id == event_id)
         return query
 
     def search_and_filter(
         self, search: Optional[str] = None, status: Optional[ContestantStatus] = None,
-        competition_id: Optional[str] = None,
+        event_id: Optional[str] = None,
         offset: int = 0, limit: int = DEFAULT_MAX_PAGE_SIZE
     ) -> Tuple[List[Participant], int]:
-        query = self._filtered_query(search, status, competition_id)
+        query = self._filtered_query(search, status, event_id)
         total = query.count()
         items = query.offset(offset).limit(limit).all()
         return items, total
@@ -194,7 +176,7 @@ class ParticipantRepository(BaseRepository[Participant]):
         self, search: Optional[str] = None, status: Optional[ContestantStatus] = None,
         offset: int = 0, limit: int = DEFAULT_MAX_PAGE_SIZE
     ) -> Tuple[List[Participant], int]:
-        """Get all participants without requiring competition_id."""
+        """Get all participants without requiring event_id."""
         query = self._base_query()
         if search:
             escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -208,25 +190,25 @@ class ParticipantRepository(BaseRepository[Participant]):
         items = query.offset(offset).limit(limit).all()
         return items, total
     
-    def get_by_competition(self, competition_id: str) -> List[Participant]:
-        """Get all approved contestants in a specific competition (for leaderboard)."""
+    def get_by_competition(self, event_id: str) -> List[Participant]:
+        """Get all approved contestants in a specific event (for leaderboard)."""
         query = self.db.query(Participant).filter(
-            Participant.competition_id == competition_id,
+            Participant.event_id == event_id,
             Participant.status == ContestantStatus.APPROVED
         )
         if hasattr(Participant, "deleted_at"):
             query = query.filter(Participant.deleted_at.is_(None))
         return query.order_by(Participant.votes.desc()).all()
     def get_public_leaderboard(
-    self,competition_id: str) -> List[Participant]|None:
+    self,event_id: str) -> List[Participant]|None:
         """
-        Return the public leaderboard for a competition.
+        Return the public leaderboard for an event.
 
         Only approved contestants are returned, ordered by vote count
         from highest to lowest.
         """
         query = self._base_query().filter(
-            Participant.competition_id == competition_id,
+            Participant.event_id == event_id,
             Participant.status == ContestantStatus.APPROVED,
         )
         return (
@@ -255,21 +237,21 @@ class PaymentRepository(BaseRepository[Payment]):
         items = query.offset(offset).limit(limit).all()
         return items, total
 
-    def get_by_voter_phone_and_competition(self, phone: str, competition_id: str) -> List[Payment]:
+    def get_by_voter_phone_and_event(self, phone: str, event_id: str) -> List[Payment]:
         """
-        Find all successful payments by a voter phone in a specific competition.
+        Find all successful payments by a voter phone in a specific event.
         Used for duplicate voter detection.
         """
         return self.db.query(Payment).filter(
             Payment.voter_phone == phone,
-            Payment.competition_id == competition_id,
+            Payment.event_id == event_id,
             Payment.status == PaymentStatus.PAID
         ).all()
 
-    def get_by_competition(self, competition_id: str) -> List[Payment]:
-        """Get all payments for a specific competition."""
+    def get_by_event(self, event_id: str) -> List[Payment]:
+        """Get all payments for a specific event."""
         return self.db.query(Payment).filter(
-            Payment.competition_id == competition_id
+            Payment.event_id == event_id
         ).order_by(Payment.date.desc()).all()
 
     def get_recent_pending_by_phone(self, phone: str, minutes: int = 10) -> List[Payment]:

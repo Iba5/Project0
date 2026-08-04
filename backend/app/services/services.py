@@ -844,17 +844,17 @@ class ParticipantService:
 
     def list_participants(
         self, search: Optional[str] = None, status: Optional[ContestantStatus] = None,
-        competition_id: Optional[str] = None,
+        event_id: Optional[str] = None,
         offset: int = 0, limit: int = 100
     ) -> Tuple[List[Participant], int]:
-        # If no competition_id provided, get all participants
-        if not competition_id:
+        # If no event_id provided, get all participants
+        if not event_id:
             return self.part_repo.get_all_participants(search, status, offset, limit)
-        return self.part_repo.search_and_filter(search, status, competition_id, offset, limit)
+        return self.part_repo.search_and_filter(search, status, event_id, offset, limit)
 
     async def list_public_participants_cached(
         self, search: Optional[str] = None, status: Optional[ContestantStatus] = None,
-        competition_id: Optional[str] = None,
+        event_id: Optional[str] = None,
         offset: int = 0, limit: int = 100
     ) -> Tuple[List[Participant], int]:
         """
@@ -865,13 +865,13 @@ class ParticipantService:
 
         # Skip caching for searches or custom parameters (too many combinations)
         if search or status or offset != 0 or limit != 100:
-            return self.list_participants(search, status, competition_id, offset, limit)
+            return self.list_participants(search, status, event_id, offset, limit)
         
         try:
             cache_service = get_cache_service()
             cache_key = get_cache_key(
                 CACHE_PREFIXES['participants'],
-                f"comp:{competition_id}" if competition_id else "global"
+                f"event:{event_id}" if event_id else "global"
             )
             
             # Try to get from cache (synchronous)
@@ -881,8 +881,8 @@ class ParticipantService:
                 # Return the cached data directly (endpoint will handle serialization)
                 return cached_data['items'], cached_data['total']
             
-            # Cache miss - fetch from database
-            items, total = self.list_participants(search, status, competition_id, offset, limit)
+            # Cache miss - fetch from database (only approved participants)
+            items, total = self.list_participants(search, ContestantStatus.APPROVED, event_id, offset, limit)
 
             # Store in cache (synchronous)
             cache_service.set(cache_key, {'items': items, 'total': total}, CACHE_TTL['MEDIUM'])
@@ -892,8 +892,8 @@ class ParticipantService:
 
         except Exception as e:
             logger.error(f"Cache error for public participants, falling back to DB: {e}")
-            # Fallback to database query on cache failure
-            return self.list_participants(search, status, competition_id, offset, limit)
+            # Fallback to database query on cache failure (only approved participants)
+            return self.list_participants(search, ContestantStatus.APPROVED, event_id, offset, limit)
 
     def get_participant(self, part_id: str) -> Optional[Participant]:
         part = self.part_repo.get_by_id(part_id)
@@ -981,13 +981,14 @@ class ParticipantService:
         # Fire and forget - don't block the main operation
         asyncio.create_task(_invalidate())
 
-    def get_leaderboard(self, competition_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_leaderboard(self, event_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
-        Returns the public leaderboard for a competition.
+        Returns the public leaderboard for an event.
         Does NOT expose voter phone numbers or emails.
+        Only approved participants are shown.
         """
-        if competition_id:
-            participants = self.part_repo.get_by_competition(competition_id)
+        if event_id:
+            participants = self.part_repo.get_by_competition(event_id)
         else:
             all_participants = self.part_repo.get_all()
             participants = [p for p in all_participants if p.status == ContestantStatus.APPROVED]
@@ -1005,7 +1006,7 @@ class ParticipantService:
             for p in participants
         ]
 
-    async def get_leaderboard_cached(self, competition_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def get_leaderboard_cached(self, event_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Returns the public leaderboard with Redis caching.
         Does NOT expose voter phone numbers or emails.
@@ -1014,7 +1015,7 @@ class ParticipantService:
         
         try:
             cache_service = get_cache_service()
-            cache_key = get_cache_key(CACHE_PREFIXES['leaderboard'], f"comp:{competition_id}" if competition_id else "global")
+            cache_key = get_cache_key(CACHE_PREFIXES['leaderboard'], f"event:{event_id}" if event_id else "global")
             
             # Try to get from cache (synchronous)
             cached_data = cache_service.get(cache_key)
@@ -1023,7 +1024,7 @@ class ParticipantService:
                 return cached_data
             
             # Cache miss - fetch from database
-            leaderboard_data = self.get_leaderboard(competition_id)
+            leaderboard_data = self.get_leaderboard(event_id)
             
             # Store in cache (synchronous)
             cache_service.set(cache_key, leaderboard_data, CACHE_TTL['MEDIUM'])
@@ -1034,7 +1035,7 @@ class ParticipantService:
         except Exception as e:
             logger.error(f"Cache error for leaderboard, falling back to DB: {e}")
             # Fallback to database query on cache failure
-            return self.get_leaderboard(competition_id)
+            return self.get_leaderboard(event_id)
 
     def get_public_leaderboard(self, competition_id: str):
         return self.part_repo.get_public_leaderboard(competition_id)

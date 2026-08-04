@@ -24,13 +24,8 @@ class EventStatus(str, Enum):
     ARCHIVED = "archived"
 
 class ContestantStatus(str, Enum):
-    DRAFT = "draft"
-    SUBMITTED = "submitted"
-    UNDER_REVIEW = "under_review"
     APPROVED = "approved"
-    REJECTED = "rejected"
     DISQUALIFIED = "disqualified"
-    ARCHIVED = "archived"
 
 class PaymentStatus(str, Enum):
     CREATED = "created"
@@ -41,12 +36,6 @@ class PaymentStatus(str, Enum):
     CANCELLED = "cancelled"
     REFUNDED = "refunded"
     EXPIRED = "expired"
-
-class CompetitionStatus(str, Enum):
-    DRAFT = "draft"
-    ACTIVE = "active"
-    COMPLETED = "completed"
-    ARCHIVED = "archived"
 
 class PaymentMethod(str, Enum):
     """Supported payment methods for voting"""

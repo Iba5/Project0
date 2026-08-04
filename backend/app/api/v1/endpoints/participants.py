@@ -18,7 +18,7 @@ allow_update = Depends(PermissionChecker(Permission.CONTESTANTS_UPDATE))
 @router.get("/public")
 def list_public_participants(
     search: Optional[str] = None,
-    competition_id: Optional[str] = None,
+    event_id: Optional[str] = None,
     pagination: PaginationParams = Depends(),
     db: Session = Depends(get_db),
 ):
@@ -27,7 +27,7 @@ def list_public_participants(
 
     # Use synchronous version for now (async version requires event loop)
     items, total = part_service.list_participants(
-        search, ContestantStatus.APPROVED, competition_id, pagination.offset, pagination.limit
+        search, ContestantStatus.APPROVED, event_id, pagination.offset, pagination.limit
     )
 
     return paginate_response(
@@ -46,14 +46,14 @@ def list_public_participants(
 def list_participants(
     search: Optional[str] = Query(None, description="Search by name or category"),
     status: Optional[ContestantStatus] = Query(None, description="Filter by contestant lifecycle status"),
-    competition_id: Optional[str] = Query(None, description="Filter by competition"),
+    event_id: Optional[str] = Query(None, description="Filter by event"),
     pagination: PaginationParams = Depends(),
     db: Session = Depends(get_db)
 ):
     """Admin endpoint - requires authentication"""
     part_service = ParticipantService(db)
     items, total = part_service.list_participants(
-        search, status, competition_id,
+        search, status, event_id,
         pagination.offset, pagination.limit
     )
     return paginate_response(items, total, pagination.page, pagination.page_size)
@@ -72,11 +72,11 @@ def list_participants(
     description="Returns contestants ordered by votes. No voter PII exposed."
 )
 async def get_public_leaderboard(
-    competition_id: Optional[str] = Query(None, description="Optional competition ID"),
+    event_id: Optional[str] = Query(None, description="Optional event ID"),
     db: Session = Depends(get_db)
 ):
     part_service = ParticipantService(db)
-    leaderboard_data = await part_service.get_leaderboard_cached(competition_id)
+    leaderboard_data = await part_service.get_leaderboard_cached(event_id)
     return {"leaderboard": leaderboard_data}
 
 
