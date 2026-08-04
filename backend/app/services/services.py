@@ -681,10 +681,18 @@ class EventService:
             details=f"Created event: {saved.name} ({saved.id})"
         )
         
-        # Invalidate cache after event creation
-        self._invalidate_event_cache_async()
+        # Invalidate cache synchronously (called from thread pool)
+        try:
+            cache_service = get_cache_service()
+            cache_service.invalidate_events()
+        except Exception as e:
+            logger.error(f"Failed to invalidate events cache: {e}")
         
         return saved
+
+    def _invalidate_event_cache_async(self):
+        """No longer used - cache invalidation is now synchronous"""
+        pass
 
     def update_event(self, event_id: str, event_in: EventUpdate) -> Event:
         event = self.event_repo.get_by_id(event_id)
@@ -724,23 +732,16 @@ class EventService:
             details=f"Soft deleted event: {event.name} ({event.id})"
         )
         
-        # Invalidate cache after event deletion
-        self._invalidate_event_cache_async()
+        # Invalidate cache synchronously (called from thread pool)
+        try:
+            cache_service = get_cache_service()
+            cache_service.invalidate_events()
+        except Exception as e:
+            logger.error(f"Failed to invalidate events cache: {e}")
 
     def _invalidate_event_cache_async(self):
-        """Async cache invalidation helper for events."""
-        import asyncio
-        from app.core.cache import get_cache_service
-        
-        async def _invalidate():
-            try:
-                cache_service = get_cache_service()
-                await cache_service.invalidate_events()
-            except Exception as e:
-                logger.error(f"Failed to invalidate events cache: {e}")
-        
-        # Fire and forget - don't block the main operation
-        asyncio.create_task(_invalidate())
+        """No longer used - cache invalidation is now synchronous"""
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -782,12 +783,12 @@ class ParticipantService:
         try:
             cache_service = get_cache_service()
             cache_key = get_cache_key(
-                CACHE_PREFIXES['public_participants'],
+                CACHE_PREFIXES['participants'],
                 f"comp:{competition_id}" if competition_id else "global"
             )
             
-            # Try to get from cache
-            cached_data = await cache_service.get(cache_key)
+            # Try to get from cache (synchronous)
+            cached_data = cache_service.get(cache_key)
             if cached_data is not None:
                 logger.info(f"Cache hit for public participants: {cache_key}")
                 # Return the cached data directly (endpoint will handle serialization)
@@ -796,8 +797,8 @@ class ParticipantService:
             # Cache miss - fetch from database
             items, total = self.list_participants(search, status, platform, competition_id, offset, limit)
             
-            # Store in cache (store as objects - endpoint will serialize)
-            await cache_service.set(cache_key, {'items': items, 'total': total}, CACHE_TTL['public_participants'])
+            # Store in cache (synchronous)
+            cache_service.set(cache_key, {'items': items, 'total': total}, CACHE_TTL['MEDIUM'])
             logger.info(f"Cache miss and set for public participants: {cache_key}")
             
             return items, total
@@ -928,8 +929,8 @@ class ParticipantService:
             cache_service = get_cache_service()
             cache_key = get_cache_key(CACHE_PREFIXES['leaderboard'], f"comp:{competition_id}" if competition_id else "global")
             
-            # Try to get from cache
-            cached_data = await cache_service.get(cache_key)
+            # Try to get from cache (synchronous)
+            cached_data = cache_service.get(cache_key)
             if cached_data is not None:
                 logger.info(f"Cache hit for leaderboard: {cache_key}")
                 return cached_data
@@ -937,8 +938,8 @@ class ParticipantService:
             # Cache miss - fetch from database
             leaderboard_data = self.get_leaderboard(competition_id)
             
-            # Store in cache
-            await cache_service.set(cache_key, leaderboard_data, CACHE_TTL['leaderboard'])
+            # Store in cache (synchronous)
+            cache_service.set(cache_key, leaderboard_data, CACHE_TTL['MEDIUM'])
             logger.info(f"Cache miss and set for leaderboard: {cache_key}")
             
             return leaderboard_data

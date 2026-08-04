@@ -96,6 +96,21 @@ class CacheService:
             logger.error(f"Cache pattern invalidate error for {pattern}: {str(e)}")
         return 0
     
+    def invalidate_events(self) -> int:
+        """Invalidate all event-related cache keys."""
+        if not self._enabled:
+            return 0
+            
+        try:
+            redis = self._get_redis()
+            if redis:
+                keys = redis.keys(f"{CACHE_PREFIXES['events']}:*")
+                if keys:
+                    return redis.delete(*keys)
+        except Exception as e:
+            logger.error(f"Cache events invalidate error: {str(e)}")
+        return 0
+    
     def clear_all(self) -> bool:
         """Clear all cache keys."""
         if not self._enabled:
@@ -165,12 +180,15 @@ CACHE_TTL = {
     'MEDIUM': 300,         # 5 minutes
     'LONG': 3600,          # 1 hour
     'DAILY': 86400,        # 24 hours
+    'leaderboard': 300,    # 5 minutes
+    'public_participants': 300,  # 5 minutes
 }
 
 # Cache key prefixes
 CACHE_PREFIXES = {
     'leaderboard': 'leaderboard',
     'participants': 'participants',
+    'public_participants': 'public_participants',
     'events': 'events',
     'stats': 'stats',
     'payment_methods': 'payment_methods',
