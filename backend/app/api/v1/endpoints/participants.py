@@ -18,7 +18,6 @@ allow_update = Depends(PermissionChecker(Permission.CONTESTANTS_UPDATE))
 @router.get("/public")
 def list_public_participants(
     search: Optional[str] = None,
-    status: Optional[ContestantStatus] = None,
     competition_id: Optional[str] = None,
     pagination: PaginationParams = Depends(),
     db: Session = Depends(get_db),

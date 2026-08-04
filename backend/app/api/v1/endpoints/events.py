@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.api.v1.dependencies import PermissionChecker, get_current_active_user, PaginationParams
-from app.enums.enums import Permission
+from app.enums.enums import Permission, EventStatus
 from app.services.services import EventService
 from app.schemas.schemas import EventCreate, EventUpdate, EventResponse
 from app.repositories.repositories import paginate_response
@@ -20,10 +20,37 @@ allow_delete = Depends(PermissionChecker(Permission.EVENTS_DELETE))
 
 @router.get(
     "/",
-    summary="List all events (paginated)",
-    description="Public endpoint - returns all events, frontend filters drafts for public users"
+    summary="List public events (paginated)",
+    description="Public endpoint - returns only published events"
 )
-def list_events(pagination: PaginationParams = Depends(), db: Session = Depends(get_db)):
+def list_public_events(pagination: PaginationParams = Depends(), db: Session = Depends(get_db)):
+    event_service = EventService(db)
+    items, total = event_service.list_events(pagination.offset, pagination.limit)
+    
+    # Filter to only published events for public access
+    published_events = [event for event in items if event.status == EventStatus.PUBLISHED]
+    
+    # Add computed status to each event
+    for event in published_events:
+        event.computed_status = get_computed_event_status(
+            event.status,
+            event.start_date,
+            event.end_date,
+            event.registration_opens,
+            event.registration_closes,
+            event.voting_opens,
+            event.voting_closes,
+        )
+    
+    return paginate_response(published_events, len(published_events), pagination.page, pagination.page_size)
+
+@router.get(
+    "/admin",
+    summary="List all events (paginated)",
+    description="Admin endpoint - returns all events including drafts",
+    dependencies=[allow_read]
+)
+def list_admin_events(pagination: PaginationParams = Depends(), db: Session = Depends(get_db)):
     event_service = EventService(db)
     items, total = event_service.list_events(pagination.offset, pagination.limit)
     

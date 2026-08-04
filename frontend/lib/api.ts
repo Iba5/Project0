@@ -230,7 +230,7 @@ export async function listEvents(params?: ListEventsParams): Promise<{ items: Ev
   if (params?.search) searchParams.set('search', params.search)
   if (params?.status) searchParams.set('status', params.status)
   const qs = searchParams.toString()
-  return apiFetch(`/events${qs ? `?${qs}` : ''}`)
+  return apiFetch(`/events/admin${qs ? `?${qs}` : ''}`)
 }
 
 export async function listPublicEvents(): Promise<{ items: EventItem[]; pagination: any }> {
