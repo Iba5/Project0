@@ -234,7 +234,7 @@ export async function listEvents(params?: ListEventsParams): Promise<{ items: Ev
 }
 
 export async function listPublicEvents(): Promise<{ items: EventItem[]; pagination: any }> {
-  return apiFetch('/public/events')
+  return apiFetch('/events')
 }
 
 export async function getEvent(id: string): Promise<EventItem> {

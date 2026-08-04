@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
-import { format, parseISO, differenceInCalendarDays, isValid } from 'date-fns'
+import { format, differenceInCalendarDays, isValid } from 'date-fns'
 import {
   CalendarDays,
   Clock,
@@ -22,6 +22,7 @@ import { useAppStore } from '@/lib/store'
 import { useRouter } from 'next/navigation'
 import { listPublicEvents, type EventItem } from '@/lib/api'
 import { nameToSolidGradient } from '@/lib/utils'
+import { safeParseDate, formatDateRange } from '@/lib/date-utils'
 import { toast } from 'sonner'
 import { EventCardSkeleton } from '@/components/shared/skeletons'
 import { EmptyState as SharedEmptyState } from '@/components/shared/empty-state'
@@ -86,27 +87,8 @@ function matchesFilter(bucket: ReturnType<typeof classifyEvent>, filter: FilterK
 
 // ─── Date formatting helpers ──────────────────────────────────────
 
-function safeParse(value: string | null | undefined): Date | null {
-  if (!value) return null
-  const d = parseISO(value)
-  return isValid(d) ? d : null
-}
-
-function formatRange(startISO: string, endISO: string): string {
-  const start = safeParse(startISO)
-  const end = safeParse(endISO)
-  if (!start && !end) return 'Dates TBA'
-  if (start && end) {
-    if (start.getFullYear() === end.getFullYear()) {
-      return `${format(start, 'MMM d')} → ${format(end, 'MMM d, yyyy')}`
-    }
-    return `${format(start, 'MMM d, yyyy')} → ${format(end, 'MMM d, yyyy')}`
-  }
-  return start ? format(start, 'MMM d, yyyy') : end ? format(end, 'MMM d, yyyy') : 'Dates TBA'
-}
-
 function daysRemaining(endISO: string): number | null {
-  const end = safeParse(endISO)
+  const end = safeParseDate(endISO)
   if (!end) return null
   const now = new Date()
   if (end < now) return null
@@ -244,7 +226,7 @@ function EventCard({ event, onViewContestants, onShare }: { event: EventItem; on
           style={{ color: 'var(--text-muted)' }}
         >
           <CalendarDays className="w-3.5 h-3.5 shrink-0" />
-          <span>{formatRange(event.startDate, event.endDate)}</span>
+          <span>{formatDateRange(event.startDate, event.endDate)}</span>
         </div>
 
         {/* Days remaining row */}

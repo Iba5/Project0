@@ -25,6 +25,7 @@ import { listEvents, createEvent, updateEvent, deleteEvent, publishEvent, type E
 import { uploadImage } from '@/lib/upload-api'
 import { apiUrl } from '@/lib/api-client'
 import { nameToSolidGradient } from '@/lib/utils'
+import { formatDateTime, formatForInput } from '@/lib/date-utils'
 import { useAppStore } from '@/lib/store'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
@@ -426,16 +427,16 @@ export function AdminEventsView() {
       name: event.name,
       description: event.description || '',
       banner: event.banner || '',
-      startDate: event.startDate ? new Date(event.startDate).toISOString().slice(0, 16) : '',
-      endDate: event.endDate ? new Date(event.endDate).toISOString().slice(0, 16) : '',
+      startDate: formatForInput(event.startDate),
+      endDate: formatForInput(event.endDate),
       status: event.status,
       votePrice: event.votePrice,
       votesPerPayment: event.votesPerPayment,
       currency: event.currency,
-      registrationOpens: event.registrationOpens ? new Date(event.registrationOpens).toISOString().slice(0, 16) : '',
-      registrationCloses: event.registrationCloses ? new Date(event.registrationCloses).toISOString().slice(0, 16) : '',
-      votingOpens: event.votingOpens ? new Date(event.votingOpens).toISOString().slice(0, 16) : '',
-      votingCloses: event.votingCloses ? new Date(event.votingCloses).toISOString().slice(0, 16) : '',
+      registrationOpens: formatForInput(event.registrationOpens),
+      registrationCloses: formatForInput(event.registrationCloses),
+      votingOpens: formatForInput(event.votingOpens),
+      votingCloses: formatForInput(event.votingCloses),
       publicLeaderboard: event.publicLeaderboard,
       requireContestantApproval: event.requireContestantApproval,
       enableVideos: event.enableVideos,
@@ -792,18 +793,10 @@ export function AdminEventsView() {
                     </TableCell>
                     <TableCell>{statusBadge(event.status, event.computedStatus)}</TableCell>
                     <TableCell className="text-sm" style={{ color: 'var(--text-muted)' }}>
-                      {new Date(event.startDate).toLocaleDateString(undefined, {
-                        year: 'numeric',
-                        month: 'short',
-                        day: 'numeric',
-                      })}
+                      {formatDateTime(event.startDate)}
                     </TableCell>
                     <TableCell className="text-sm" style={{ color: 'var(--text-muted)' }}>
-                      {new Date(event.endDate).toLocaleDateString(undefined, {
-                        year: 'numeric',
-                        month: 'short',
-                        day: 'numeric',
-                      })}
+                      {formatDateTime(event.endDate)}
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-1 justify-end">
