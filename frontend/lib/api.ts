@@ -202,8 +202,6 @@ export interface EventItem {
   votingOpens: string | null
   votingCloses: string | null
   publicLeaderboard: boolean
-  allowedPlatforms: string
-  allowedCategories: string
   requireContestantApproval: boolean
   competitionId: string | null
   createdAt: string

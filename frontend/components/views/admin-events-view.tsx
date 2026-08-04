@@ -85,8 +85,6 @@ const eventSchema = z.object({
   votingOpens: z.string().optional(),
   votingCloses: z.string().optional(),
   publicLeaderboard: z.boolean().default(true),
-  allowedCategories: z.string().optional(),
-  allowedPlatforms: z.string().optional(),
 })
 
 type EventFormValues = z.infer<typeof eventSchema>
@@ -384,8 +382,6 @@ export function AdminEventsView() {
       votingOpens: '',
       votingCloses: '',
       publicLeaderboard: true,
-      allowedCategories: 'Singing,Dancing,Comedy',
-      allowedPlatforms: 'TikTok,Facebook,Instagram,YouTube',
     },
   })
 
@@ -404,8 +400,6 @@ export function AdminEventsView() {
       votingOpens: '',
       votingCloses: '',
       publicLeaderboard: true,
-      allowedCategories: 'Singing,Dancing,Comedy',
-      allowedPlatforms: 'TikTok,Facebook,Instagram,YouTube',
     })
     setFormOpen(true)
   }
@@ -425,8 +419,6 @@ export function AdminEventsView() {
       votingOpens: event.votingOpens ? new Date(event.votingOpens).toISOString().slice(0, 16) : '',
       votingCloses: event.votingCloses ? new Date(event.votingCloses).toISOString().slice(0, 16) : '',
       publicLeaderboard: event.publicLeaderboard,
-      allowedCategories: event.allowedCategories,
-      allowedPlatforms: event.allowedPlatforms,
     })
     setFormOpen(true)
   }
@@ -982,26 +974,6 @@ export function AdminEventsView() {
                     onCheckedChange={(val) => form.setValue('publicLeaderboard', val)}
                   />
                   <Label style={{ color: 'var(--text-muted)' }}>Public Leaderboard</Label>
-                </div>
-
-                <div className="space-y-2">
-                  <Label style={{ color: 'var(--text-muted)' }}>Allowed Categories (comma-separated)</Label>
-                  <Input
-                    {...form.register('allowedCategories')}
-                    className="rounded-xl border-none"
-                    style={{ background: 'var(--surface-3)', color: 'var(--text-primary)' }}
-                    placeholder="Singing,Dancing,Comedy"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label style={{ color: 'var(--text-muted)' }}>Allowed Platforms (comma-separated)</Label>
-                  <Input
-                    {...form.register('allowedPlatforms')}
-                    className="rounded-xl border-none"
-                    style={{ background: 'var(--surface-3)', color: 'var(--text-primary)' }}
-                    placeholder="TikTok,Facebook,Instagram,YouTube"
-                  />
                 </div>
               </div>
             </div>

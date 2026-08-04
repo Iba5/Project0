@@ -186,6 +186,24 @@ class ParticipantRepository(BaseRepository[Participant]):
         items = query.offset(offset).limit(limit).all()
         return items, total
     
+    def get_all_participants(
+        self, search: Optional[str] = None, status: Optional[ContestantStatus] = None,
+        offset: int = 0, limit: int = DEFAULT_MAX_PAGE_SIZE
+    ) -> Tuple[List[Participant], int]:
+        """Get all participants without requiring competition_id."""
+        query = self._base_query()
+        if search:
+            escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            query = query.filter(
+                Participant.name.ilike(f"%{escaped}%", escape="\\") |
+                Participant.category.ilike(f"%{escaped}%", escape="\\")
+            )
+        if status:
+            query = query.filter(Participant.status == status)
+        total = query.count()
+        items = query.offset(offset).limit(limit).all()
+        return items, total
+    
     def get_by_competition(self, competition_id: str) -> List[Participant]:
         """Get all approved contestants in a specific competition (for leaderboard)."""
         query = self.db.query(Participant).filter(

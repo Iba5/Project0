@@ -65,8 +65,6 @@ export type EventRecord = {
   votingOpens: string | null
   votingCloses: string | null
   publicLeaderboard: boolean
-  allowedCategories: string
-  allowedPlatforms: string
 }
 
 export type ParticipantRecord = {

@@ -479,56 +479,68 @@ class DashboardService:
         self.db = db
 
     def get_summary(self) -> Dict[str, Any]:
-        active_event = self.event_repo.get_active_event()
-        active_event_name = active_event.name if active_event else "No Active Event"
+        try:
+            active_event = self.event_repo.get_active_event()
+            active_event_name = active_event.name if active_event else "No Active Event"
 
-        # H1 FIX: Use SQL COUNT/SUM instead of loading all rows into Python
-        total_participants = self.db.query(func.count(Participant.id)).filter(
-            Participant.deleted_at.is_(None)
-        ).scalar() or 0
+            # H1 FIX: Use SQL COUNT/SUM instead of loading all rows into Python
+            total_participants = self.db.query(func.count(Participant.id)).filter(
+                Participant.deleted_at.is_(None)
+            ).scalar() or 0
 
-        total_votes = self.db.query(func.coalesce(func.sum(Participant.votes), 0)).filter(
-            Participant.deleted_at.is_(None)
-        ).scalar() or 0
+            total_votes = self.db.query(func.coalesce(func.sum(Participant.votes), 0)).filter(
+                Participant.deleted_at.is_(None)
+            ).scalar() or 0
 
-        total_revenue_result = self.db.query(func.coalesce(func.sum(Payment.amount), 0)).filter(
-            Payment.status == PaymentStatus.PAID
-        ).scalar()
-        total_revenue_num = float(total_revenue_result) if total_revenue_result else 0.0
+            total_revenue_result = self.db.query(func.coalesce(func.sum(Payment.amount), 0)).filter(
+                Payment.status == PaymentStatus.PAID
+            ).scalar()
+            total_revenue_num = float(total_revenue_result) if total_revenue_result else 0.0
 
-        # Recent payments — limit query at DB level
-        recent_payment_rows = self.db.query(Payment).order_by(Payment.date.desc()).limit(5).all()
+            # Recent payments — limit query at DB level
+            recent_payment_rows = self.db.query(Payment).order_by(Payment.date.desc()).limit(5).all()
 
-        contestant_ids = {p.contestant_id for p in recent_payment_rows if p.contestant_id}
-        contestants_map: Dict[str, str] = {}
-        if contestant_ids:
-            batch = self.participant_repo.get_by_ids(contestant_ids)
-            contestants_map = {c.id: c.name for c in batch}
+            contestant_ids = {p.contestant_id for p in recent_payment_rows if p.contestant_id}
+            contestants_map: Dict[str, str] = {}
+            if contestant_ids:
+                batch = self.participant_repo.get_by_ids(contestant_ids)
+                contestants_map = {c.id: c.name for c in batch}
 
-        recent_payments: List[Dict[str, Any]] = []
-        for p in recent_payment_rows:
-            participant_name = contestants_map.get(p.contestant_id, "Unknown") if p.contestant_id else "Unknown"
+            recent_payments: List[Dict[str, Any]] = []
+            for p in recent_payment_rows:
+                participant_name = contestants_map.get(p.contestant_id, "Unknown") if p.contestant_id else "Unknown"
 
-            recent_payments.append({
-                "id": p.id,
-                "reference": p.reference,
-                "contestant": participant_name,
-                "amount": f"${float(p.amount):.2f}",
-                "paymentMethod": p.payment_method,
-                "status": p.status,
-                "date": p.date,
-            })
+                recent_payments.append({
+                    "id": p.id,
+                    "reference": p.reference,
+                    "contestant": participant_name,
+                    "amount": f"${float(p.amount):.2f}",
+                    "paymentMethod": p.payment_method,
+                    "status": p.status,
+                    "date": p.date,
+                })
 
-        recent_activities = self.activity_repo.get_recent(5)
+            recent_activities = self.activity_repo.get_recent(5)
 
-        return {
-            "activeEvent": active_event_name,
-            "totalParticipants": total_participants,
-            "totalVotes": total_votes,
-            "totalRevenue": f"${total_revenue_num:.2f}",
-            "recentPayments": recent_payments,
-            "recentActivity": recent_activities
-        }
+            return {
+                "activeEvent": active_event_name,
+                "totalParticipants": total_participants,
+                "totalVotes": total_votes,
+                "totalRevenue": f"${total_revenue_num:.2f}",
+                "recentPayments": recent_payments,
+                "recentActivity": recent_activities,
+            }
+        except Exception as e:
+            logger.error(f"Error fetching dashboard summary: {e}")
+            # Return empty data instead of crashing
+            return {
+                "activeEvent": "Error loading data",
+                "totalParticipants": 0,
+                "totalVotes": 0,
+                "totalRevenue": "$0.00",
+                "recentPayments": [],
+                "recentActivity": [],
+            }
 
 
 # ---------------------------------------------------------------------------
@@ -761,6 +773,9 @@ class ParticipantService:
         platform: Optional[PlatformEnum] = None, competition_id: Optional[str] = None,
         offset: int = 0, limit: int = 100
     ) -> Tuple[List[Participant], int]:
+        # If no competition_id provided, get all participants
+        if not competition_id:
+            return self.part_repo.get_all_participants(search, status, offset, limit)
         return self.part_repo.search_and_filter(search, status, platform, competition_id, offset, limit)
 
     async def list_public_participants_cached(
