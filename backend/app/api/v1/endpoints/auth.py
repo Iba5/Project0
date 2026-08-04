@@ -89,7 +89,9 @@ def register(
             value=auth_result.refresh_token,
             httponly=True,
             secure=settings.COOKIE_SECURE,
-            samesite="lax",
+            samesite="none",  # Required for cross-domain cookies
+            domain=None,  # Allow browser to handle domain automatically
+            path="/",
             max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60  # Convert days to seconds
         )
     
@@ -168,7 +170,9 @@ def login(
             value=auth_result.refresh_token,
             httponly=True,
             secure=settings.COOKIE_SECURE,
-            samesite="lax",
+            samesite="none",  # Required for cross-domain cookies
+            domain=None,  # Allow browser to handle domain automatically
+            path="/",
             max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60  # Convert days to seconds
         )
     
@@ -195,7 +199,9 @@ def logout(
         key="refresh_token",
         httponly=True,
         secure=settings.COOKIE_SECURE,
-        samesite="lax"
+        samesite="none",  # Required for cross-domain cookies
+        domain=None,  # Allow browser to handle domain automatically
+        path="/"
     )
     
     return {"success": True, "message": "Successfully logged out."}
@@ -271,7 +277,9 @@ def complete_signup(
             value=auth_result.refresh_token,
             httponly=True,
             secure=settings.COOKIE_SECURE,
-            samesite="lax",
+            samesite="none",  # Required for cross-domain cookies
+            domain=None,  # Allow browser to handle domain automatically
+            path="/",
             max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60  # Convert days to seconds
         )
     
@@ -421,7 +429,9 @@ def refresh_token(
         value=new_refresh_token,
         httponly=True,
         secure=settings.COOKIE_SECURE,
-        samesite="lax",
+        samesite="none",  # Required for cross-domain cookies
+        domain=None,  # Allow browser to handle domain automatically
+        path="/",
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60  # Convert days to seconds
     )
     

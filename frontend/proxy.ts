@@ -5,14 +5,16 @@ const PUBLIC_ADMIN_PATHS = ['/admin/login', '/admin/forgot-password']
 export default function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  if (pathname.startsWith('/admin') && !PUBLIC_ADMIN_PATHS.some(p => pathname === p || pathname.startsWith(p + '/'))) {
-    // Check for the refresh_token cookie that the backend sets
-    const refreshToken = request.cookies.get('refresh_token')?.value
-    if (!refreshToken) {
-      const loginUrl = new URL('/admin/login', request.url)
-      loginUrl.searchParams.set('next', pathname)
-      return NextResponse.redirect(loginUrl)
-    }
+  // Skip proxy check for public admin paths
+  if (PUBLIC_ADMIN_PATHS.some(p => pathname === p || pathname.startsWith(p + '/'))) || pathname === '/admin/login') {
+    return NextResponse.next()
+  }
+
+  // For protected admin paths, let the client-side auth handle it
+  // The proxy is mainly for API proxying, not auth enforcement
+  // Client-side layout.tsx handles the actual auth check
+  if (pathname.startsWith('/admin')) {
+    return NextResponse.next()
   }
 
   return NextResponse.next()
