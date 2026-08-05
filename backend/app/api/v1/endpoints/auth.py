@@ -1,12 +1,13 @@
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import create_access_token, create_refresh_token, decode_refresh_token
 from app.services.services import AuthService
+from app.utils.email import email_service, PreparedEmail
 from app.schemas.schemas import (
     AuthResult,
     AdminInvitationResponse,
@@ -214,10 +215,22 @@ def logout(
 )
 def forgot_password(
     req: ForgotPasswordRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
     auth_service = AuthService(db)
-    auth_service.request_password_reset(req.email)
+    email_data = auth_service.request_password_reset(req.email)
+
+    # Queue email sending in background if email was prepared
+    if email_data:
+        background_tasks.add_task(
+            email_service.send_email,
+            email_data.to_email,
+            email_data.subject,
+            email_data.html_content,
+            email_data.text_content
+        )
+
     return {"message": "If the email is registered, a password reset link has been sent to your email."}
 
 
@@ -244,12 +257,24 @@ def reset_password(
 )
 def invite_admin(
     invitation_request: AdminInvitationRequest,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(PermissionChecker(Permission.ADMINS_MANAGE)),
     db: Session = Depends(get_db),
 ) -> AdminInvitationResponse:
     auth_service = AuthService(db)
     # C3 FIX: Let custom exceptions propagate with correct status codes.
-    return auth_service.create_admin_invitation(invitation_request, current_user)
+    response, email_data = auth_service.create_admin_invitation(invitation_request, current_user)
+
+    # Queue email sending in background
+    background_tasks.add_task(
+        email_service.send_email,
+        email_data.to_email,
+        email_data.subject,
+        email_data.html_content,
+        email_data.text_content
+    )
+
+    return response
 
 
 @router.post(

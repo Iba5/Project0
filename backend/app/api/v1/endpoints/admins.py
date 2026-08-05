@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, status, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List
 
 from app.core.database import get_db
 from app.api.v1.dependencies import PermissionChecker, get_current_active_user
 from app.enums.enums import Permission
+from app.utils.email import email_service, PreparedEmail
 from app.models.models import User
 from app.schemas.schemas import UserResponse
 from app.repositories.repositories import UserRepository
@@ -67,10 +68,11 @@ def list_admins_alias(current_user: User = allow_authenticated, db: Session = De
 )
 def invite_admin(
     payload: dict,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    return process_admin_invitation(payload, current_user, db)
+    return process_admin_invitation(payload, current_user, db, background_tasks)
 
 
 @router.post(
@@ -81,23 +83,33 @@ def invite_admin(
 )
 def invite_admin_alias(
     payload: dict,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    return process_admin_invitation(payload, current_user, db)
+    return process_admin_invitation(payload, current_user, db, background_tasks)
 
 
 # Helper logic for invitation to avoid code duplication
-def process_admin_invitation(payload: dict, current_user: User, db: Session):
+def process_admin_invitation(payload: dict, current_user: User, db: Session, background_tasks: BackgroundTasks):
     from app.services.services import AuthService
     from app.schemas.schemas import AdminInvitationRequest
     from app.enums.enums import UserRole
-    
+
     auth_service = AuthService(db)
     role_val = UserRole(payload.get("role", "admin"))
     req = AdminInvitationRequest(email=payload["email"], role=role_val)
-    inv = auth_service.create_admin_invitation(req, current_user)
-    
+    inv, email_data = auth_service.create_admin_invitation(req, current_user)
+
+    # Queue email sending in background
+    background_tasks.add_task(
+        email_service.send_email,
+        email_data.to_email,
+        email_data.subject,
+        email_data.html_content,
+        email_data.text_content
+    )
+
     return {
         "admin": {
             "id": inv.email,

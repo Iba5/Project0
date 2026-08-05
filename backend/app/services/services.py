@@ -20,6 +20,7 @@ from app.repositories.repositories import (
     SettingsRepository, VoteTransactionRepository,
     PaymentMethodConfigRepository, TestPaymentRepository
 )
+from app.utils.email import PreparedEmail
 from app.core.security import hash_password, verify_password, create_access_token, create_refresh_token
 from app.exceptions.exceptions import ValidationException, NotFoundException, PaymentException
 from app.schemas.schemas import (
@@ -207,7 +208,11 @@ class AuthService:
             details="User logged out"
         )
 
-    def request_password_reset(self, email: str) -> None:
+    def request_password_reset(self, email: str) -> PreparedEmail | None:
+        """
+        Request password reset and return email data for background sending.
+        Returns PreparedEmail if user exists, None otherwise.
+        """
         user = self.user_repo.get_by_email(email)
         if user:
             reset_token = str(uuid.uuid4())
@@ -217,19 +222,25 @@ class AuthService:
             user.reset_token_expires = reset_token_expires
             self.user_repo.update()
 
-            email_sent = email_service.send_password_reset_email(
+            AuditService.log_action(
+                db=self.db,
+                action="Password Reset Requested",
+                user_id=user.id,
+                details=f"Reset link requested for {email}"
+            )
+
+            # Prepare email data for background sending
+            email_data = email_service.prepare_password_reset_email(
                 to_email=user.email,
                 reset_token=reset_token,
                 user_name=user.name
             )
 
-            logger.info(f"Password reset requested for: {email}, email sent: {email_sent}")
-            AuditService.log_action(
-                db=self.db,
-                action="Password Reset Requested",
-                user_id=user.id,
-                details=f"Reset link requested for {email}, email sent: {email_sent}"
-            )
+            logger.info(f"Password reset requested for: {email}, email prepared for background sending")
+            return email_data
+
+        logger.info(f"Password reset requested for non-existent email: {email}")
+        return None
 
     def reset_password(self, reset_request: ResetPasswordRequest) -> bool:
         user = self.user_repo.get_by_reset_token(reset_request.token)
@@ -264,7 +275,11 @@ class AuthService:
 
         return True
 
-    def create_admin_invitation(self, invitation_request: AdminInvitationRequest, inviter_user: User) -> AdminInvitationResponse:
+    def create_admin_invitation(self, invitation_request: AdminInvitationRequest, inviter_user: User) -> tuple[AdminInvitationResponse, PreparedEmail]:
+        """
+        Create admin invitation and return response with email data for background sending.
+        Returns tuple of (response, PreparedEmail).
+        """
         if inviter_user.role != UserRole.SUPER_ADMIN:
             raise AuthenticationException("Only super admins can create admin invitations")
 
@@ -288,13 +303,7 @@ class AuthService:
         self.user_repo.create(new_user)
 
         invitation_link = f"{email_service.frontend_url}/accept-invitation?token={invitation_token}"
-        email_sent = email_service.send_admin_invitation_email(
-            to_email=invitation_request.email,
-            invitation_link=invitation_link,
-            inviter_name=inviter_user.name,
-            )
 
-        logger.info(f"Admin invitation created for: {invitation_request.email}, email sent: {email_sent}")
         AuditService.log_action(
             db=self.db,
             action="Admin Invitation Created",
@@ -302,12 +311,23 @@ class AuthService:
             details=f"Invitation sent to {invitation_request.email} with role {invitation_request.role.value}"
         )
 
-        return AdminInvitationResponse(
+        # Prepare email data for background sending
+        email_data = email_service.prepare_admin_invitation_email(
+            to_email=invitation_request.email,
+            invitation_link=invitation_link,
+            inviter_name=inviter_user.name,
+        )
+
+        logger.info(f"Admin invitation created for: {invitation_request.email}, email prepared for background sending")
+
+        response = AdminInvitationResponse(
             email=invitation_request.email,
             role=invitation_request.role,
             invitation_link=invitation_link,
             expires_at=invitation_token_expires
         )
+
+        return response, email_data
 
     def complete_admin_signup(self, token: str, name: str, password: str) -> AuthResult:
         user = self.user_repo.get_by_invitation_token(token)

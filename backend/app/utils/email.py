@@ -1,9 +1,20 @@
 import resend
 from typing import Optional
 import logging
+from pydantic import BaseModel
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+class PreparedEmail(BaseModel):
+    """
+    Typed model for prepared email data for background sending.
+    """
+    to_email: str
+    subject: str
+    html_content: str
+    text_content: str
 
 class EmailService:
     """
@@ -59,14 +70,15 @@ class EmailService:
             logger.error(f"Failed to send email to {to_email}: {str(e)}")
             return False
 
-    def send_password_reset_email(self, to_email: str, reset_token: str, user_name: str) -> bool:
+    def prepare_password_reset_email(self, to_email: str, reset_token: str, user_name: str) -> PreparedEmail:
         """
-        Send password reset email with reset link.
+        Prepare password reset email data for background sending.
+        Returns a PreparedEmail model with all parameters needed to send the email.
         """
         reset_link = f"{self.frontend_url}/reset-password?token={reset_token}"
-        
+
         subject = "Reset Your Password"
-        
+
         text_content = f"""
 Hello {user_name},
 
@@ -142,19 +154,37 @@ The Voting Platform Team
 </html>
 """
 
-        return self.send_email(to_email, subject, html_content, text_content)
+        return PreparedEmail(
+            to_email=to_email,
+            subject=subject,
+            html_content=html_content,
+            text_content=text_content
+        )
 
-    def send_admin_invitation_email(
-    self,
-    to_email: str,
-    invitation_link: str,
-    inviter_name: str,
-    )  -> bool:        
+    def send_password_reset_email(self, to_email: str, reset_token: str, user_name: str) -> bool:
         """
-        Send admin invitation email with signup link.
+        Send password reset email with reset link (legacy method for direct sending).
+        """
+        email_data = self.prepare_password_reset_email(to_email, reset_token, user_name)
+        return self.send_email(
+            email_data.to_email,
+            email_data.subject,
+            email_data.html_content,
+            email_data.text_content
+        )
+
+    def prepare_admin_invitation_email(
+        self,
+        to_email: str,
+        invitation_link: str,
+        inviter_name: str,
+    ) -> PreparedEmail:
+        """
+        Prepare admin invitation email data for background sending.
+        Returns a PreparedEmail model with all parameters needed to send the email.
         """
         subject = "Admin Account Invitation"
-        
+
         text_content = f"""
 Hello,
 
@@ -230,7 +260,29 @@ The Voting Platform Team
 </html>
 """
 
-        return self.send_email(to_email, subject, html_content, text_content)
+        return PreparedEmail(
+            to_email=to_email,
+            subject=subject,
+            html_content=html_content,
+            text_content=text_content
+        )
+
+    def send_admin_invitation_email(
+        self,
+        to_email: str,
+        invitation_link: str,
+        inviter_name: str,
+    ) -> bool:
+        """
+        Send admin invitation email with signup link (legacy method for direct sending).
+        """
+        email_data = self.prepare_admin_invitation_email(to_email, invitation_link, inviter_name)
+        return self.send_email(
+            email_data.to_email,
+            email_data.subject,
+            email_data.html_content,
+            email_data.text_content
+        )
 
 # Global email service instance
 email_service = EmailService()
