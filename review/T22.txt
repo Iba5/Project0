@@ -1,0 +1,1345 @@
+================ frontend/lib/api.ts ================
+132-  id: string
+133-  name: string
+134-  category: string
+135-  votes: number
+136-  trend: 'up' | 'down' | 'same'
+137-  trendVotes: number
+138-  imageUrl: string | null
+139-  thumbnailUrl: string | null
+140-}
+141-
+142-export interface EnhancedActivityEntry {
+143-  id: string
+144-  title: string
+145-  detail: string | null
+146-  time: string
+147-  category: string | null
+148-  participantName: string | null
+149-  voteCount: number | null
+150-}
+151-
+152:export interface DashboardSummary {
+153-  activeEvent: {
+154-    id: string
+155-    name: string
+156-    status: string
+157-  } | null
+158-  totalParticipants: number
+159-  totalVotes: number
+160-  totalRevenue: number
+161-  recentPayments: Array<{
+162-    id: string
+163-    reference: string
+164-    amount: number
+165-    status: string
+166-    paymentMethod: string
+167-    createdAt: string
+168-  }>
+169-  recentActivity: Array<{
+170-    id: string
+171-    title: string
+172-    detail: string | null
+173-    time: string
+174-  }>
+175-  range: DashboardRange
+176-  dateFrom: string | null
+177-  revenueTrend: RevenueTrendPoint[]
+178-  votesByCategory: VotesByCategoryPoint[]
+179-  topPaymentMethods: TopPaymentMethodPoint[]
+180-  voteTrend: VoteTrendPoint[]
+181-  topPerformers: TopPerformerEntry[]
+182-  enhancedRecentActivity: EnhancedActivityEntry[]
+183-}
+184-
+185:export async function getDashboardSummary(
+186-  range?: DashboardRange | string,
+187:): Promise<DashboardSummary> {
+188-  const qs = range ? `?range=${encodeURIComponent(range)}` : ''
+189-  return apiFetch(`/dashboard${qs}`)
+190-}
+191-
+192:export const getDashboard = getDashboardSummary
+193-
+194-// ─── Events ──────────────────────────────────────────────────────
+195-
+196-export interface EventItem {
+197-  id: string
+198-  name: string
+199-  description: string | null
+200-  banner: string | null
+201-  startDate: string
+202-  endDate: string
+203-  status: string
+204-  computedStatus?: string
+205-  votePrice: number
+206-  votesPerPayment: number
+207-  currency: string
+208-  registrationOpens: string | null
+209-  registrationCloses: string | null
+210-  votingOpens: string | null
+211-  votingCloses: string | null
+212-  publicLeaderboard: boolean
+213-  requireContestantApproval: boolean
+214-  enableVideos: boolean
+215-  shareLink: string | null
+216-  eventId: string | null
+217-  createdAt: string
+218-  deletedAt: string | null
+219-  participantCount?: number
+220-}
+221-
+222-export interface ListEventsParams {
+223-  search?: string
+224-  status?: string
+225-}
+226-
+227-export async function listEvents(params?: ListEventsParams): Promise<{ items: EventItem[]; pagination: any }> {
+228-  const searchParams = new URLSearchParams()
+229-  if (params?.search) searchParams.set('search', params.search)
+230-  if (params?.status) searchParams.set('status', params.status)
+231-  const qs = searchParams.toString()
+232-  return apiFetch(`/events/admin${qs ? `?${qs}` : ''}`)
+233-}
+234-
+235-export async function listPublicEvents(): Promise<{ items: EventItem[]; pagination: any }> {
+236-  return apiFetch('/events')
+237-}
+238-
+239-export async function getEvent(id: string): Promise<EventItem> {
+240-  return apiFetch(`/events/${id}`)
+241-}
+242-
+243-export async function createEvent(payload: Record<string, unknown>): Promise<{ id: string; event: EventItem }> {
+244-  return apiFetch('/events', {
+245-    method: 'POST',
+246-    body: JSON.stringify(payload),
+247-  })
+248-}
+249-
+250-export async function updateEvent(id: string, payload: Record<string, unknown>): Promise<EventItem> {
+251-  return apiFetch(`/events/${id}`, {
+252-    method: 'PUT',
+253-    body: JSON.stringify(payload),
+254-  })
+255-}
+256-
+257-export async function deleteEvent(id: string): Promise<void> {
+258-  return apiFetch(`/events/${id}`, { method: 'DELETE' })
+259-}
+260-
+261-export async function publishEvent(id: string): Promise<{ event: EventItem }> {
+262-  return apiFetch(`/events/${id}/publish`, {
+263-    method: 'POST',
+264-  })
+265-}
+266-
+267-// ─── Participants ────────────────────────────────────────────────
+268-
+269-export interface ParticipantItem {
+270-  id: string
+271-  name: string
+272-  category: string
+
+================ frontend/lib/types.ts ================
+136-}
+137-
+138-export type ActivityRecord = {
+139-  id: string
+140-  title: string
+141-  detail: string | null
+142-  time: string
+143-}
+144-
+145-export type AuthResult = {
+146-  token: string
+147-  user: {
+148-    id: string
+149-    name: string
+150-    email: string
+151-    role: UserRole
+152-  }
+153-  message: string
+154-}
+155-
+156:export type DashboardSummary = {
+157-  activeEvent: string
+158-  totalParticipants: number
+159-  totalVotes: number
+160-  totalRevenue: string
+161-  recentPayments: PaymentRecord[]
+162-  recentActivity: ActivityRecord[]
+163-}
+164-
+165-export type SettingsProfile = {
+166-  companyName: string
+167-  supportEmail: string
+168-  timezone: string
+169-  notifications: {
+170-    email: boolean
+171-    sms: boolean
+172-    marketing: boolean
+173-  }
+174-}
+175-
+176-export type PaymentMethodOption = {
+177-  id: string
+178-  name: string
+179-  type: "mobile_money" | "card" | "digital_wallet"
+180-  isPrimary?: boolean
+181-}
+
+================ frontend/components/views/admin-dashboard-view.tsx ================
+19-  Trophy,
+20-  CalendarRange,
+21-  TrendingUp,
+22-  TrendingDown,
+23-  PieChart as PieChartIcon,
+24-  BarChart3,
+25-  Award,
+26-  Settings,
+27-  ChevronRight,
+28-  ArrowUpRight,
+29-  ArrowDownRight,
+30-  Clock,
+31-  ScrollText,
+32-  CalendarClock,
+33-  ListChecks,
+34-  Eye,
+35-} from 'lucide-react'
+36-import { useAppStore, viewToPath } from '@/lib/store'
+37-import { useRouter } from 'next/navigation'
+38-import {
+39:  getDashboardSummary,
+40-  getPublicLeaderboard,
+41-  listPayments,
+42-  listParticipants,
+43-  listEvents,
+44-  type DashboardSummary,
+45-  type DashboardRange,
+46-  type PublicLeaderboardEntry,
+47-  type PaymentItem,
+48-  type ParticipantItem,
+49-  type EventItem,
+50-} from '@/lib/api'
+51-import { useChartTheme, CHART_PALETTE } from '@/lib/chart-theme'
+52-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+53-import { Badge } from '@/components/ui/badge'
+54-import { Button } from '@/components/ui/button'
+55-import {
+56-  Select,
+57-  SelectContent,
+58-  SelectItem,
+59-  SelectTrigger,
+60-  SelectValue,
+61-} from '@/components/ui/select'
+62-import {
+63-  Table,
+64-  TableBody,
+65-  TableCell,
+66-  TableHead,
+67-  TableHeader,
+68-  TableRow,
+69-} from '@/components/ui/table'
+70-import { Skeleton } from '@/components/ui/skeleton'
+71-import {
+72-  BarChart,
+73-  Bar,
+74-  PieChart,
+75-  Pie,
+76-  XAxis,
+77-  YAxis,
+78-  CartesianGrid,
+79-  Tooltip,
+80-  ResponsiveContainer,
+81-  Cell,
+82-  Area,
+83-  AreaChart,
+84-  Legend,
+85-} from 'recharts'
+86-import { VoteTrendChart } from '@/components/dashboard/vote-trend-chart'
+87-import { CategoryDonutChart } from '@/components/dashboard/category-donut-chart'
+88-import { TopPerformersLeaderboard } from '@/components/dashboard/top-performers-leaderboard'
+89-import { RecentActivityTimeline } from '@/components/dashboard/recent-activity-timeline'
+90-
+91-// ─── Types ────────────────────────────────────────────────────────
+92-
+93-type IconType = ComponentType<{ className?: string; style?: CSSProperties }>
+94-
+95-// ─── Color palette for the Top 10 Performers bar chart ────────────
+96-
+97-const TOP_PERFORMER_COLORS = [
+98-  '#F59E0B',
+99-  '#FBBF24',
+--
+623-export function AdminDashboardView() {
+624-  const { adminUser } = useAppStore()
+625-  const router = useRouter()
+626-  const theme = useChartTheme()
+627-  const [data, setData] = useState<DashboardSummary | null>(null)
+628-  const [leaderboard, setLeaderboard] = useState<PublicLeaderboardEntry[]>([])
+629-  const [payments, setPayments] = useState<PaymentItem[]>([])
+630-  const [participants, setParticipants] = useState<ParticipantItem[]>([])
+631-  const [events, setEvents] = useState<EventItem[]>([])
+632-  const [loading, setLoading] = useState(true)
+633-  const [refetching, setRefetching] = useState(false)
+634-  const [range, setRange] = useState<DashboardRange>('30d')
+635-
+636-  useEffect(() => {
+637-    let cancelled = false
+638-    if (data) {
+639-      // eslint-disable-next-line react-hooks/set-state-in-effect
+640-      setRefetching(true)
+641-    }
+642-    Promise.allSettled([
+643:      getDashboardSummary(range),
+644-      getPublicLeaderboard(),
+645-      listPayments(),
+646-      listParticipants(),
+647-      listEvents(),
+648-    ])
+649-      .then(([summaryRes, lbRes, pmtsRes, partsRes, eventsRes]) => {
+650-        if (cancelled) return
+651-        if (summaryRes.status === 'fulfilled') setData(summaryRes.value)
+652-        if (lbRes.status === 'fulfilled')
+653-          setLeaderboard(lbRes.value.leaderboard || [])
+654-        if (pmtsRes.status === 'fulfilled')
+655-          setPayments(pmtsRes.value.payments || [])
+656-        if (partsRes.status === 'fulfilled')
+657-          setParticipants(partsRes.value.items || [])
+658-        if (eventsRes.status === 'fulfilled')
+659-          setEvents(eventsRes.value.items || [])
+660-      })
+661-      .finally(() => {
+662-        if (!cancelled) {
+663-          setLoading(false)
+664-          setRefetching(false)
+665-        }
+666-      })
+667-    return () => {
+668-      cancelled = true
+669-    }
+670-  }, [range])
+671-
+672-  // ─── Derived data ─────────────────────────────────────────────
+673-
+674-  const topContestants = useMemo(() => {
+675-    return [...participants]
+676-      .sort((a, b) => b.votes - a.votes)
+677-      .slice(0, 5)
+678-  }, [participants])
+679-  const topContestantMaxVotes =
+680-    topContestants.length > 0 ? topContestants[0].votes : 0
+681-
+682:  const topPerformers = leaderboard.slice(0, 5)
+683:  const maxVotes = topPerformers.length > 0 ? topPerformers[0].votes : 0
+684-
+685-  const methodCounts: {
+686-    method: string
+687-    count: number
+688-    percentage: number
+689-  }[] = useMemo(() => {
+690-    const counts: Record<string, number> = {}
+691-    payments.forEach((p) => {
+692-      const m = p.paymentMethod || 'Unknown'
+693-      counts[m] = (counts[m] || 0) + 1
+694-    })
+695-    const total = payments.length
+696-    return Object.entries(counts)
+697-      .map(([method, count]) => ({
+698-        method,
+699-        count,
+700-        percentage: total > 0 ? Math.round((count / total) * 100) : 0,
+701-      }))
+702-      .sort((a, b) => b.count - a.count)
+703-  }, [payments])
+704-
+705-  const stats = useMemo(() => {
+706-    if (!data) return []
+707-    const revenueSpark =
+708:      data.revenueTrend.length > 0
+709:        ? data.revenueTrend.slice(-7).map((p) => p.total)
+710-        : buildSparkline(Math.max(50, data.totalRevenue * 0.1), 'up', 1)
+711-
+712-    return [
+713-      {
+714-        key: 'active-event',
+715-        label: 'Active Event',
+716:        value: data.activeEvent?.name || 'None',
+717-        icon: CalendarCheck as IconType,
+718-        color: '#F59E0B',
+719-        gradient:
+720-          'linear-gradient(135deg, rgba(245,158,11,0.18), rgba(217,119,6,0.06))',
+721-        trend: 'flat' as const,
+722-        trendPct: 0,
+723-        spark: buildSparkline(1, 'flat', 11),
+724-        view: 'admin-events' as const,
+725-      },
+726-      {
+727-        key: 'total-participants',
+728-        label: 'Total Contestants',
+729-        value: data.totalParticipants.toString(),
+730-        icon: Users as IconType,
+731-        color: '#34D399',
+732-        gradient:
+733-          'linear-gradient(135deg, rgba(16,185,129,0.18), rgba(5,150,105,0.06))',
+734-        trend: 'up' as const,
+735-        trendPct: 12.4,
+736-        spark: buildSparkline(
+737-          Math.max(2, Math.round(data.totalParticipants * 0.12)),
+738-          'up',
+739-          23
+740-        ),
+741-        view: 'admin-participants' as const,
+742-      },
+743-      {
+744-        key: 'total-votes',
+745-        label: 'Total Votes',
+746-        value: data.totalVotes.toLocaleString(),
+747-        icon: Vote as IconType,
+748-        color: '#A78BFA',
+749-        gradient:
+750-          'linear-gradient(135deg, rgba(139,92,246,0.18), rgba(109,40,217,0.06))',
+751-        trend: 'up' as const,
+752-        trendPct: 8.7,
+753-        spark: buildSparkline(
+754-          Math.max(10, Math.round(data.totalVotes * 0.1)),
+755-          'up',
+756-          37
+757-        ),
+758-        view: 'leaderboard' as const,
+759-      },
+760-      {
+761-        key: 'total-revenue',
+762-        label: 'Total Revenue',
+763-        value: `$${data.totalRevenue.toLocaleString()}`,
+764-        icon: DollarSign as IconType,
+765-        color: '#60A5FA',
+766-        gradient:
+767-          'linear-gradient(135deg, rgba(59,130,246,0.18), rgba(37,99,235,0.06))',
+768-        trend: revenueSpark.length >= 2 && revenueSpark[revenueSpark.length - 1] >= revenueSpark[0]
+769-          ? ('up' as const)
+770-          : ('down' as const),
+771-        trendPct:
+772-          revenueSpark.length >= 2 && revenueSpark[0] > 0
+773-            ? Math.round(
+774-                ((revenueSpark[revenueSpark.length - 1] - revenueSpark[0]) /
+775-                  revenueSpark[0]) *
+776-                  100
+--
+998-                      height={28}
+999-                      idSuffix={stat.key}
+1000-                    />
+1001-                  </div>
+1002-                </CardContent>
+1003-              </Card>
+1004-            </motion.div>
+1005-          )
+1006-        })}
+1007-      </div>
+1008-
+1009-      {/* ═══ NEW: Vote Trend + Category Distribution (2-col) ═══ */}
+1010-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+1011-        <motion.div
+1012-          initial={{ opacity: 0, y: 16 }}
+1013-          animate={{ opacity: 1, y: 0 }}
+1014-          transition={{ duration: 0.4, delay: 0.1 }}
+1015-        >
+1016-          {data && (
+1017-            <VoteTrendChart
+1018:              data={data.voteTrend}
+1019-              accent={theme.accent}
+1020-            />
+1021-          )}
+1022-        </motion.div>
+1023-
+1024-        <motion.div
+1025-          initial={{ opacity: 0, y: 16 }}
+1026-          animate={{ opacity: 1, y: 0 }}
+1027-          transition={{ duration: 0.4, delay: 0.18 }}
+1028-        >
+1029-          {data && (
+1030-            <CategoryDonutChart
+1031:              data={data.votesByCategory}
+1032-              accent={theme.accent}
+1033-            />
+1034-          )}
+1035-        </motion.div>
+1036-      </div>
+1037-
+1038-      {/* ═══ NEW: Top Performers + Recent Activity Timeline (2-col) ═══ */}
+1039-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+1040-        <motion.div
+1041-          initial={{ opacity: 0, y: 16 }}
+1042-          animate={{ opacity: 1, y: 0 }}
+1043-          transition={{ duration: 0.4, delay: 0.22 }}
+1044-        >
+1045-          {data && (
+1046-            <TopPerformersLeaderboard
+1047:              data={data.topPerformers}
+1048-              accent={theme.accent}
+1049-              onViewAll={() => router.push('/admin/participants')}
+1050-            />
+1051-          )}
+1052-        </motion.div>
+1053-
+1054-        <motion.div
+1055-          initial={{ opacity: 0, y: 16 }}
+1056-          animate={{ opacity: 1, y: 0 }}
+1057-          transition={{ duration: 0.4, delay: 0.28 }}
+1058-        >
+1059-          {data && (
+1060-            <RecentActivityTimeline
+1061:              data={data.enhancedRecentActivity}
+1062-              accent={theme.accent}
+1063-              onViewAll={() => router.push('/admin/audit')}
+1064-            />
+1065-          )}
+1066-        </motion.div>
+1067-      </div>
+1068-
+1069-      {/* ─── Revenue Trend + Event Status Overview (2-col) ────────── */}
+1070-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+1071-        {/* Revenue Trend (area chart) */}
+1072-        <motion.div
+1073-          initial={{ opacity: 0, y: 16 }}
+1074-          animate={{ opacity: 1, y: 0 }}
+1075-          transition={{ duration: 0.4, delay: 0.32 }}
+1076-        >
+1077-          <Card
+1078-            className="rounded-xl border hover-lift h-full"
+1079-            style={{
+1080-              background: 'var(--surface-1)',
+1081-              borderColor: 'var(--border-subtle)',
+1082-            }}
+1083-          >
+1084-            <CardHeader className="pb-3 p-4 md:p-6">
+1085-              <SectionHeader
+1086-                icon={TrendingUp}
+1087-                title="Revenue Trend"
+1088-                accent={theme.accent}
+1089-                action={
+1090-                  <span
+1091-                    className="text-[10px] font-medium px-2 py-0.5 rounded-full hidden sm:inline"
+1092-                    style={{
+1093-                      background: 'rgba(245,158,11,0.12)',
+1094-                      color: theme.accent,
+1095-                    }}
+1096-                  >
+1097-                    {rangeLabel(range)}
+1098-                  </span>
+1099-                }
+1100-              />
+1101-              <p
+1102-                className="text-xs -mt-1"
+1103-                style={{ color: 'var(--text-muted)' }}
+1104-              >
+1105-                Daily paid revenue across all payment methods
+1106-              </p>
+1107-            </CardHeader>
+1108-            <CardContent className="p-4 md:p-6 pt-0">
+1109-              <div className="h-60 relative">
+1110-                {refetching && (
+1111-                  <div
+1112-                    className="absolute inset-0 z-10 rounded-lg skeleton-shimmer"
+1113-                    aria-hidden
+1114-                  />
+1115-                )}
+1116:                {data && data.revenueTrend.length > 0 ? (
+1117-                  <ResponsiveContainer width="100%" height="100%">
+1118-                    <AreaChart
+1119:                      data={data.revenueTrend}
+1120-                      margin={{ top: 8, right: 8, left: 8, bottom: 8 }}
+1121-                    >
+1122-                      <defs>
+1123-                        <linearGradient
+1124:                          id="revenueTrendFill"
+1125-                          x1="0"
+1126-                          y1="0"
+1127-                          x2="0"
+1128-                          y2="1"
+1129-                        >
+1130-                          <stop
+1131-                            offset="0%"
+1132-                            stopColor={theme.accent}
+1133-                            stopOpacity={0.4}
+1134-                          />
+1135-                          <stop
+1136-                            offset="100%"
+1137-                            stopColor={theme.accent}
+1138-                            stopOpacity={0}
+1139-                          />
+1140-                        </linearGradient>
+1141-                      </defs>
+1142-                      <CartesianGrid
+1143-                        strokeDasharray="3 3"
+1144-                        stroke={theme.grid}
+1145-                        vertical={false}
+1146-                      />
+1147-                      <XAxis
+1148-                        dataKey="date"
+1149-                        tick={{ fill: theme.tick, fontSize: 11 }}
+1150-                        axisLine={{ stroke: theme.grid }}
+1151-                        tickLine={false}
+1152-                        tickFormatter={(v: string) => {
+1153-                          const d = new Date(v + 'T00:00:00Z')
+1154-                          if (Number.isNaN(d.getTime())) return v
+1155-                          return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`
+1156-                        }}
+1157-                        minTickGap={24}
+1158-                      />
+1159-                      <YAxis
+1160-                        tick={{ fill: theme.tick, fontSize: 11 }}
+1161-                        axisLine={{ stroke: theme.grid }}
+1162-                        tickLine={false}
+1163-                        tickFormatter={(v: number) => `$${v}`}
+1164-                        width={48}
+1165-                      />
+1166-                      <Tooltip
+1167-                        content={<RevenueTrendTooltip />}
+1168-                        cursor={{
+1169-                          stroke: theme.accent,
+1170-                          strokeWidth: 1,
+1171-                          strokeDasharray: '3 3',
+1172-                        }}
+1173-                      />
+1174-                      <Area
+1175-                        type="monotone"
+1176-                        dataKey="total"
+1177-                        stroke={theme.accent}
+1178-                        strokeWidth={2}
+1179:                        fill="url(#revenueTrendFill)"
+1180-                        isAnimationActive
+1181-                        animationDuration={700}
+1182-                        dot={false}
+1183-                        activeDot={{
+1184-                          r: 4,
+1185-                          fill: theme.accent,
+1186-                          stroke: theme.tooltipBg,
+1187-                          strokeWidth: 2,
+1188-                        }}
+1189-                      />
+1190-                    </AreaChart>
+1191-                  </ResponsiveContainer>
+1192-                ) : (
+1193-                  <div className="flex flex-col items-center justify-center h-full">
+1194-                    <TrendingUp
+1195-                      className="w-8 h-8 mb-2"
+1196-                      style={{ color: 'var(--text-muted)' }}
+1197-                    />
+1198-                    <p
+1199-                      className="text-sm text-center"
+1200-                      style={{ color: 'var(--text-muted)' }}
+1201-                    >
+1202-                      No revenue data for this range
+1203-                    </p>
+1204-                  </div>
+1205-                )}
+1206-              </div>
+1207-            </CardContent>
+1208-          </Card>
+1209-        </motion.div>
+1210-
+1211-        {/* Event Status Overview */}
+1212-        <motion.div
+1213-          initial={{ opacity: 0, y: 16 }}
+1214-          animate={{ opacity: 1, y: 0 }}
+1215-          transition={{ duration: 0.4, delay: 0.36 }}
+1216-        >
+1217-          <Card
+1218-            className="rounded-xl border hover-glow h-full"
+1219-            style={{
+1220-              background: 'var(--surface-1)',
+1221-              borderColor: 'var(--border-subtle)',
+1222-            }}
+1223-          >
+1224-            <CardHeader className="pb-3 p-4 md:p-6">
+1225-              <SectionHeader
+1226-                icon={CalendarClock}
+1227-                title="Event Status Overview"
+1228-                accent="#34D399"
+1229-                action={
+1230-                  <Button
+1231-                    variant="ghost"
+1232-                    size="sm"
+1233-                    className="h-7 text-xs gap-1 px-2 hover:bg-amber-500/10"
+1234-                    style={{ color: theme.accent }}
+1235-                    onClick={() => router.push('/admin/events')}
+1236-                  >
+1237-                    Manage Events
+1238-                    <ArrowRight className="w-3 h-3" />
+1239-                  </Button>
+--
+1377-              <SectionHeader
+1378-                icon={PieChartIcon}
+1379-                title="Votes by Category"
+1380-                accent={theme.accent}
+1381-              />
+1382-              <p
+1383-                className="text-xs -mt-1"
+1384-                style={{ color: 'var(--text-muted)' }}
+1385-              >
+1386-                Current vote distribution · all categories
+1387-              </p>
+1388-            </CardHeader>
+1389-            <CardContent className="p-4 md:p-6 pt-0">
+1390-              <div className="h-60 relative">
+1391-                {refetching && (
+1392-                  <div
+1393-                    className="absolute inset-0 z-10 rounded-lg skeleton-shimmer"
+1394-                    aria-hidden
+1395-                  />
+1396-                )}
+1397:                {data && data.votesByCategory.length > 0 ? (
+1398-                  <ResponsiveContainer width="100%" height="100%">
+1399-                    <PieChart>
+1400-                      <Pie
+1401:                        data={data.votesByCategory}
+1402-                        dataKey="votes"
+1403-                        nameKey="category"
+1404-                        cx="50%"
+1405-                        cy="50%"
+1406-                        innerRadius={45}
+1407-                        outerRadius={70}
+1408-                        paddingAngle={2}
+1409-                        isAnimationActive
+1410-                        animationDuration={700}
+1411-                      >
+1412:                        {data.votesByCategory.map((entry, index) => (
+1413-                          <Cell
+1414-                            key={`pie-cell-${entry.category}-${index}`}
+1415-                            fill={
+1416-                              CHART_PALETTE[index % CHART_PALETTE.length]
+1417-                            }
+1418-                            stroke={theme.tooltipBg}
+1419-                            strokeWidth={2}
+1420-                          />
+1421-                        ))}
+1422-                      </Pie>
+1423-                      <Tooltip
+1424-                        content={({
+1425-                          active,
+1426-                          payload,
+1427-                        }: {
+1428-                          active?: boolean
+1429-                          payload?: Array<{ name?: string; value?: number }>
+1430-                        }) => {
+1431-                          if (active && payload && payload.length) {
+1432-                            return (
+1433-                              <div
+1434-                                className="rounded-lg px-3 py-2 text-xs shadow-lg"
+1435-                                style={{
+1436-                                  background: theme.tooltipBg,
+1437-                                  border: `1px solid ${theme.tooltipBorder}`,
+1438-                                  color: theme.tooltipText,
+1439-                                }}
+1440-                              >
+1441-                                <p className="font-medium">
+1442-                                  {payload[0]?.name}
+1443-                                </p>
+1444-                                <p style={{ color: theme.accent }}>
+1445-                                  {Number(
+1446-                                    payload[0]?.value || 0
+1447-                                  ).toLocaleString()}{' '}
+1448-                                  votes
+1449-                                </p>
+1450-                              </div>
+1451-                            )
+1452-                          }
+1453-                          return null
+1454-                        }}
+1455-                      />
+1456-                      <Legend
+1457-                        verticalAlign="bottom"
+1458-                        height={32}
+1459-                        formatter={(value: string) => (
+1460-                          <span
+1461-                            className="text-[11px]"
+1462-                            style={{ color: theme.tick }}
+1463-                          >
+1464-                            {value}
+1465-                          </span>
+1466-                        )}
+1467-                      />
+1468-                    </PieChart>
+1469-                  </ResponsiveContainer>
+1470-                ) : (
+1471-                  <div className="flex flex-col items-center justify-center h-full">
+1472-                    <PieChartIcon
+--
+1503-              <SectionHeader
+1504-                icon={BarChart3}
+1505-                title="Top Payment Methods"
+1506-                accent={theme.accent}
+1507-              />
+1508-              <p
+1509-                className="text-xs -mt-1"
+1510-                style={{ color: 'var(--text-muted)' }}
+1511-              >
+1512-                Revenue by method · {rangeLabel(range)}
+1513-              </p>
+1514-            </CardHeader>
+1515-            <CardContent className="p-4 md:p-6 pt-0">
+1516-              <div className="h-60 relative">
+1517-                {refetching && (
+1518-                  <div
+1519-                    className="absolute inset-0 z-10 rounded-lg skeleton-shimmer"
+1520-                    aria-hidden
+1521-                  />
+1522-                )}
+1523:                {data && data.topPaymentMethods.length > 0 ? (
+1524-                  <ResponsiveContainer width="100%" height="100%">
+1525-                    <BarChart
+1526:                      data={data.topPaymentMethods}
+1527-                      barSize={28}
+1528-                      margin={{ top: 8, right: 8, left: 8, bottom: 8 }}
+1529-                    >
+1530-                      <CartesianGrid
+1531-                        strokeDasharray="3 3"
+1532-                        stroke={theme.grid}
+1533-                        vertical={false}
+1534-                      />
+1535-                      <XAxis
+1536-                        dataKey="method"
+1537-                        tick={{ fill: theme.tick, fontSize: 11 }}
+1538-                        axisLine={{ stroke: theme.grid }}
+1539-                        tickLine={false}
+1540-                        interval={0}
+1541-                        angle={-15}
+1542-                        textAnchor="end"
+1543-                        height={50}
+1544-                      />
+1545-                      <YAxis
+1546-                        tick={{ fill: theme.tick, fontSize: 11 }}
+1547-                        axisLine={{ stroke: theme.grid }}
+1548-                        tickLine={false}
+1549-                        tickFormatter={(v: number) => `$${v}`}
+1550-                        width={48}
+1551-                      />
+1552-                      <Tooltip
+1553-                        content={<PaymentMethodsTooltip />}
+1554-                        cursor={{ fill: theme.cursor }}
+1555-                      />
+1556-                      <Bar
+1557-                        dataKey="total"
+1558-                        radius={[6, 6, 0, 0]}
+1559-                        isAnimationActive
+1560-                        animationDuration={700}
+1561-                      >
+1562:                        {data.topPaymentMethods.map((entry, index) => (
+1563-                          <Cell
+1564-                            key={`pm-cell-${entry.method}-${index}`}
+1565-                            fill={
+1566-                              CHART_PALETTE[index % CHART_PALETTE.length]
+1567-                            }
+1568-                          />
+1569-                        ))}
+1570-                      </Bar>
+1571-                    </BarChart>
+1572-                  </ResponsiveContainer>
+1573-                ) : (
+1574-                  <div className="flex flex-col items-center justify-center h-full">
+1575-                    <BarChart3
+1576-                      className="w-8 h-8 mb-2"
+1577-                      style={{ color: 'var(--text-muted)' }}
+1578-                    />
+1579-                    <p
+1580-                      className="text-sm text-center"
+1581-                      style={{ color: 'var(--text-muted)' }}
+1582-                    >
+1583-                      No payment method data for this range
+1584-                    </p>
+1585-                  </div>
+1586-                )}
+1587-              </div>
+1588-            </CardContent>
+1589-          </Card>
+1590-        </motion.div>
+1591-
+1592-        {/* Payment Methods Distribution */}
+1593-        <motion.div
+1594-          initial={{ opacity: 0, y: 16 }}
+1595-          animate={{ opacity: 1, y: 0 }}
+1596-          transition={{ duration: 0.4, delay: 0.26 }}
+1597-        >
+1598-          <Card
+1599-            className="rounded-xl border hover-glow h-full"
+1600-            style={{
+1601-              background: 'var(--surface-1)',
+1602-              borderColor: 'var(--border-subtle)',
+1603-            }}
+1604-          >
+1605-            <CardHeader className="pb-3 p-4 md:p-6">
+1606-              <CardTitle
+1607-                className="text-base flex items-center justify-between"
+1608-                style={{ color: 'var(--text-primary)' }}
+1609-              >
+1610-                <span className="flex items-center gap-2">
+1611-                  <CreditCard
+1612-                    className="w-4 h-4"
+1613-                    style={{ color: '#F59E0B' }}
+1614-                  />
+1615-                  Payment Methods
+1616-                </span>
+1617-                <span
+1618-                  className="text-xs font-medium px-2 py-0.5 rounded-full"
+1619-                  style={{
+1620-                    background: 'rgba(245,158,11,0.15)',
+1621-                    color: '#F59E0B',
+1622-                  }}
+--
+1850-                    style={{
+1851-                      background: 'var(--surface-3)',
+1852-                      borderBottomColor: 'var(--border-subtle)',
+1853-                    }}
+1854-                  >
+1855-                    <TableHead style={{ color: 'var(--text-muted)' }}>
+1856-                      Reference
+1857-                    </TableHead>
+1858-                    <TableHead style={{ color: 'var(--text-muted)' }}>
+1859-                      Amount
+1860-                    </TableHead>
+1861-                    <TableHead style={{ color: 'var(--text-muted)' }}>
+1862-                      Method
+1863-                    </TableHead>
+1864-                    <TableHead style={{ color: 'var(--text-muted)' }}>
+1865-                      Status
+1866-                    </TableHead>
+1867-                  </TableRow>
+1868-                </TableHeader>
+1869-                <TableBody>
+1870:                  {data?.recentPayments.map((p) => (
+1871-                    <TableRow
+1872-                      key={p.id}
+1873-                      className="table-row-hover"
+1874-                      style={{ borderBottomColor: 'var(--border-subtle)' }}
+1875-                    >
+1876-                      <TableCell
+1877-                        className="font-mono text-xs"
+1878-                        style={{ color: 'var(--text-primary)' }}
+1879-                      >
+1880-                        {p.reference}
+1881-                      </TableCell>
+1882-                      <TableCell style={{ color: 'var(--text-primary)' }}>
+1883-                        ${p.amount}
+1884-                      </TableCell>
+1885-                      <TableCell
+1886-                        className="text-sm"
+1887-                        style={{ color: 'var(--text-muted)' }}
+1888-                      >
+1889-                        {p.paymentMethod}
+1890-                      </TableCell>
+1891-                      <TableCell>{paymentStatusBadge(p.status)}</TableCell>
+1892-                    </TableRow>
+1893-                  ))}
+1894:                  {(!data?.recentPayments ||
+1895:                    data.recentPayments.length === 0) && (
+1896-                    <TableRow>
+1897-                      <TableCell
+1898-                        colSpan={4}
+1899-                        className="text-center py-8"
+1900-                        style={{ color: 'var(--text-muted)' }}
+1901-                      >
+1902-                        No recent payments
+1903-                      </TableCell>
+1904-                    </TableRow>
+1905-                  )}
+1906-                </TableBody>
+1907-              </Table>
+1908-            </CardContent>
+1909-          </Card>
+1910-        </motion.div>
+1911-      </div>
+1912-
+1913-      {/* ─── Quick Actions Row ───────────────────────────────────── */}
+1914-      <motion.div
+1915-        initial={{ opacity: 0, y: 16 }}
+1916-        animate={{ opacity: 1, y: 0 }}
+1917-        transition={{ duration: 0.4, delay: 0.42 }}
+1918-      >
+1919-        <SectionHeader
+1920-          icon={ListChecks}
+1921-          title="Quick Actions"
+1922-          accent={theme.accent}
+1923-        />
+1924-        <Card
+1925-          className="rounded-xl border hover-glow"
+1926-          style={{
+1927-            background: 'var(--surface-1)',
+1928-            borderColor: 'var(--border-subtle)',
+1929-          }}
+1930-        >
+1931-          <CardContent className="p-3">
+1932-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+1933-              {quickActions.map((action) => (
+1934-                <motion.button
+1935-                  key={action.label}
+1936-                  onClick={() => router.push(viewToPath(action.view))}
+1937-                  whileHover={{ scale: 1.02, x: 2 }}
+1938-                  whileTap={{ scale: 0.98 }}
+1939-                  transition={{
+1940-                    type: 'spring',
+1941-                    stiffness: 350,
+1942-                    damping: 22,
+1943-                  }}
+1944-                  className="flex items-center gap-3 p-3 rounded-xl transition-colors group relative overflow-hidden"
+1945-                  style={{
+1946-                    background: 'var(--surface-3)',
+1947-                    border: '1px solid var(--border-subtle)',
+1948-                  }}
+1949-                  onMouseEnter={(e) => {
+1950-                    e.currentTarget.style.background = `${action.color}12`
+1951-                    e.currentTarget.style.borderColor = `${action.color}55`
+1952-                    e.currentTarget.style.boxShadow = `0 0 0 1px ${action.color}40, 0 8px 24px -8px ${action.color}40`
+1953-                  }}
+1954-                  onMouseLeave={(e) => {
+1955-                    e.currentTarget.style.background = 'var(--surface-3)'
+
+================ frontend/lib/api-client.ts ================
+/**
+ * Centralized API client for the FastAPI backend.
+ *
+ * All API calls go through this module so the backend URL is configured
+ * in one place. Set NEXT_PUBLIC_API_URL in your .env.local to point
+ * to your FastAPI server (e.g. http://localhost:8000).
+ *
+ * If the variable is not set, it defaults to http://localhost:8000.
+ */
+
+function normalizeApiBaseUrl(raw: string): string {
+  const trimmed = raw.replace(/\/+$/, '')
+  if (trimmed.endsWith('/api/v1')) return trimmed
+  if (trimmed.match(/^https?:\/\/[^/]+$/)) return `${trimmed}/api/v1`
+  return trimmed
+}
+
+const API_BASE_URL = normalizeApiBaseUrl(
+  process.env.NEXT_PUBLIC_API_URL || process.env.BACKEND_API_URL || 'http://localhost:8000/api/v1',
+)
+
+const TOKEN_KEY = 'voting_admin_token'
+
+let warnedAboutBadBaseUrl = false
+function warnIfMisconfigured() {
+  if (warnedAboutBadBaseUrl) return
+  if (typeof window === 'undefined') return
+  const isLocalHost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+  const pointsAtLocalhost = API_BASE_URL.includes('localhost') || API_BASE_URL.includes('127.0.0.1')
+  if (!isLocalHost && pointsAtLocalhost) {
+    warnedAboutBadBaseUrl = true
+    console.error(
+      `[api-client] This site is running at ${window.location.hostname} but API_BASE_URL is ` +
+      `"${API_BASE_URL}". NEXT_PUBLIC_API_URL was not set (or not set correctly) when this ` +
+      `build was created. Every API call will fail until the env var is fixed and the app is rebuilt.`
+    )
+  }
+}
+
+/**
+ * Get the stored JWT token from localStorage.
+ * NOTE: This is being phased out in favor of cookie-based refresh tokens.
+ * Kept for backward compatibility during transition.
+ */
+export function getStoredToken(): string | null {
+  if (typeof window === 'undefined') return null
+  return localStorage.getItem(TOKEN_KEY)
+}
+
+/**
+ * Store the JWT token in localStorage.
+ * NOTE: This is being phased out in favor of cookie-based refresh tokens.
+ * Kept for backward compatibility during transition.
+ */
+export function storeToken(token: string): void {
+  if (typeof window === 'undefined') return
+  localStorage.setItem(TOKEN_KEY, token)
+}
+
+/**
+ * Clear the stored JWT token from localStorage.
+ * NOTE: This is being phased out in favor of cookie-based refresh tokens.
+ * Kept for backward compatibility during transition.
+ */
+export function clearToken(): void {
+  if (typeof window === 'undefined') return
+  localStorage.removeItem(TOKEN_KEY)
+}
+
+/**
+ * Flag to track if a token refresh is in progress
+ */
+let isRefreshing = false
+let refreshSubscribers: Array<(token: string) => void> = []
+
+/**
+ * Add a callback to be called when token refresh completes
+ */
+function subscribeTokenRefresh(callback: (token: string) => void) {
+  refreshSubscribers.push(callback)
+}
+
+/**
+ * Notify all subscribers that token refresh completed
+ */
+function onTokenRefreshed(token: string) {
+  refreshSubscribers.forEach(callback => callback(token))
+  refreshSubscribers = []
+}
+
+/**
+ * Clear all pending subscribers
+ */
+function clearRefreshSubscribers() {
+  refreshSubscribers = []
+}
+
+/**
+ * Attempt to refresh the access token using the refresh endpoint
+ */
+async function refreshAccessToken(): Promise<string | null> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+      method: 'POST',
+      credentials: 'include', // Important for sending cookies
+    })
+
+    if (!response.ok) {
+      throw new Error('Token refresh failed')
+    }
+
+    const data = await response.json()
+    const newToken = data.token
+
+    // Update the stored token (for backward compatibility)
+    if (newToken) {
+      storeToken(newToken)
+    }
+
+    return newToken
+  } catch (error) {
+    console.error('Failed to refresh token:', error)
+    clearToken()
+    clearRefreshSubscribers()
+    return null
+  }
+}
+
+/**
+ * Build a full URL for a FastAPI endpoint.
+ * Example: apiUrl('/auth/login') → 'http://localhost:8000/api/v1/auth/login'
+ * 
+ * Automatically appends trailing slashes for collection endpoints that require them.
+ */
+export function apiUrl(path: string): string {
+  warnIfMisconfigured()
+  // Ensure the path starts with /
+  let normalized = path.startsWith('/') ? path : `/${path}`
+  
+  // List of collection endpoints that require trailing slashes
+  const collectionEndpoints = [
+    '/events',
+    '/participants',
+    '/payments',
+    '/dashboard',
+    '/settings',
+    '/admins',
+    '/audit-logs',
+    '/social-router',
+  ]
+  
+  // Add trailing slash for collection endpoints if not already present
+  for (const endpoint of collectionEndpoints) {
+    if (normalized === endpoint) {
+      normalized = endpoint + '/'
+      break
+    }
+  }
+  
+  return `${API_BASE_URL}${normalized}`
+}
+
+/**
+ * Get the base API URL (useful for WebSocket connections, etc.)
+ */
+export function getApiBaseUrl(): string {
+  return API_BASE_URL
+}
+
+/**
+ * Convenience fetch wrapper that automatically prepends the FastAPI base URL.
+ * Handles JSON responses and throws on non-OK status codes.
+ * Automatically includes the JWT Authorization header if available.
+ * Implements automatic token refresh on 401 errors.
+ */
+export async function apiFetch<T = unknown>(
+  path: string,
+  options?: RequestInit,
+): Promise<T> {
+  const headers = new Headers(options?.headers || {})
+  
+  // Add JSON content type only for methods that have a body
+  const method = options?.method || 'GET'
+  if (method !== 'GET' && method !== 'HEAD' && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
+  
+  // Add Authorization header with stored token if available
+  const token = getStoredToken()
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+  
+  const res = await fetch(apiUrl(path), {
+    ...options,
+    headers,
+    credentials: 'include', // Important for sending cookies
+  })
+
+  // Parse JSON response, handle non-JSON responses
+  let data
+  const contentType = res.headers.get('content-type')
+  if (contentType && contentType.includes('application/json')) {
+    data = await res.json()
+  } else {
+    data = await res.text()
+  }
+
+  // Handle 401 errors with automatic token refresh
+  if (res.status === 401 && !isRefreshing) {
+    isRefreshing = true
+    
+    try {
+      const newToken = await refreshAccessToken()
+      
+      if (newToken) {
+        isRefreshing = false
+        onTokenRefreshed(newToken)
+        
+        // Retry the original request with the new token
+        const retryHeaders = new Headers(options?.headers || {})
+        const retryMethod = options?.method || 'GET'
+        if (retryMethod !== 'GET' && retryMethod !== 'HEAD' && !retryHeaders.has('Content-Type')) {
+          retryHeaders.set('Content-Type', 'application/json')
+        }
+        retryHeaders.set('Authorization', `Bearer ${newToken}`)
+        
+        const retryRes = await fetch(apiUrl(path), {
+          ...options,
+          headers: retryHeaders,
+          credentials: 'include',
+        })
+        
+        // Parse JSON response, handle non-JSON responses
+        let retryData
+        const retryContentType = retryRes.headers.get('content-type')
+        if (retryContentType && retryContentType.includes('application/json')) {
+          retryData = await retryRes.json()
+        } else {
+          retryData = await retryRes.text()
+        }
+        
+        if (!retryRes.ok) {
+          const errorMessage = typeof retryData === 'string' ? retryData : (retryData?.detail || retryData?.error || retryData?.message || `Request failed with status ${retryRes.status}`)
+          throw new Error(errorMessage)
+        }
+        
+        return retryData as T
+      } else {
+        // Token refresh failed — the caller decides what happens next.
+        // A shared fetch wrapper should never unilaterally navigate the
+        // whole tab; that's a page-level decision (see admin/layout.tsx).
+        isRefreshing = false
+        clearRefreshSubscribers()
+        throw new Error('Session expired. Please sign in again.')
+      }
+    } catch (refreshError) {
+      isRefreshing = false
+      clearRefreshSubscribers()
+      // Do not redirect here either — same reasoning as above.
+      throw new Error('Session expired. Please sign in again.')
+    }
+  } else if (res.status === 401 && isRefreshing) {
+    // If already refreshing, wait for the refresh to complete
+    return new Promise((resolve, reject) => {
+      subscribeTokenRefresh((token: string) => {
+        const retryHeaders = new Headers(options?.headers || {})
+        const retryMethod = options?.method || 'GET'
+        if (retryMethod !== 'GET' && retryMethod !== 'HEAD' && !retryHeaders.has('Content-Type')) {
+          retryHeaders.set('Content-Type', 'application/json')
+        }
+        retryHeaders.set('Authorization', `Bearer ${token}`)
+        
+        fetch(apiUrl(path), {
+          ...options,
+          headers: retryHeaders,
+          credentials: 'include',
+        })
+          .then(async retryRes => {
+            // Parse JSON response, handle non-JSON responses
+            let retryData
+            const retryContentType = retryRes.headers.get('content-type')
+            if (retryContentType && retryContentType.includes('application/json')) {
+              retryData = await retryRes.json()
+            } else {
+              retryData = await retryRes.text()
+            }
+            
+            if (!retryRes.ok) {
+              const errorMessage = typeof retryData === 'string' ? retryData : (retryData?.detail || retryData?.error || retryData?.message || `Request failed with status ${retryRes.status}`)
+              reject(new Error(errorMessage))
+            } else {
+              resolve(retryData as T)
+            }
+          })
+          .catch(reject)
+      })
+    })
+  }
+
+  if (!res.ok) {
+    const errorMessage = typeof data === 'string' ? data : (data?.detail || data?.error || data?.message || `Request failed with status ${res.status}`)
+    throw new Error(errorMessage)
+  }
+
+  return data as T
+}
+
+/**
+ * Upload a file to the FastAPI backend (multipart/form-data).
+ */
+export async function apiUpload<T = unknown>(
+  path: string,
+  formData: FormData,
+): Promise<T> {
+  const headers = new Headers()
+  
+  // Add Authorization header with stored token if available
+  const token = getStoredToken()
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+  
+  const res = await fetch(apiUrl(path), {
+    method: 'POST',
+    body: formData,
+    headers,
+    credentials: 'include', // Important for sending cookies
+    // Do NOT set Content-Type — browser sets it with boundary for FormData
+  })
+
+  // Parse JSON response, handle non-JSON responses
+  let data
+  const contentType = res.headers.get('content-type')
+  if (contentType && contentType.includes('application/json')) {
+    data = await res.json()
+  } else {
+    data = await res.text()
+  }
+
+  if (!res.ok) {
+    const errorMessage = typeof data === 'string' ? data : (data?.detail || data?.error || data?.message || `Upload failed with status ${res.status}`)
+    throw new Error(errorMessage)
+  }
+
+  return data as T
+}

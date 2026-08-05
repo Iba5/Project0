@@ -263,8 +263,11 @@ function AchievementCard({ achievement, index, onClick, onNewlyUnlocked }: {
 }) {
   const tierConfig = TIER_COLORS[achievement.tier] || TIER_COLORS.bronze
   const IconComponent = ICON_MAP[achievement.icon] || Vote
-  const progressPercent = achievement.requirement > 0
-    ? Math.min(100, (achievement.progress / achievement.requirement) * 100)
+  const reqVal = typeof achievement.requirement === 'number'
+    ? achievement.requirement
+    : (achievement.requirement ? (Number(achievement.requirement) || achievement.maxProgress || 0) : (achievement.maxProgress || 0))
+  const progressPercent = reqVal > 0
+    ? Math.min(100, (achievement.progress / reqVal) * 100)
     : 0
 
   // Check if this is a newly unlocked achievement (recently unlocked within last 60 seconds)
@@ -395,7 +398,7 @@ function AchievementCard({ achievement, index, onClick, onNewlyUnlocked }: {
           />
         </div>
         <div className="flex items-center justify-between text-[10px]" style={{ color: 'var(--text-muted)' }}>
-          <span>{achievement.progress}/{achievement.requirement}</span>
+          <span>{achievement.progress}/{reqVal}</span>
           {achievement.unlocked && achievement.unlockedAt && (
             <span style={{ color: tierConfig.color }}>
               {new Date(achievement.unlockedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}

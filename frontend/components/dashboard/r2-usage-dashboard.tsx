@@ -150,7 +150,7 @@ export function R2UsageDashboard() {
   const { storage, uploads, summary } = usageData
   const isNearLimit = summary.is_near_limit
   const usageColor = isNearLimit ? 'text-amber-500' : 'text-emerald-500'
-  const statusIcon = isNearLimit ? AlertTriangle : CheckCircle
+  const StatusIcon = isNearLimit ? AlertTriangle : CheckCircle
 
   return (
     <div className="space-y-6">
@@ -181,7 +181,7 @@ export function R2UsageDashboard() {
               <div className="flex items-center justify-between mb-4">
                 <HardDrive className="w-5 h-5 text-blue-500" />
                 <Badge variant={isNearLimit ? 'destructive' : 'secondary'}>
-                  {statusIcon && <statusIcon className="w-3 h-3 mr-1" />}
+                  {StatusIcon && <StatusIcon className="w-3 h-3 mr-1" />}
                   {isNearLimit ? 'Near Limit' : 'Healthy'}
                 </Badge>
               </div>

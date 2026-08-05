@@ -18,6 +18,7 @@ import {
   Upload,
   Loader2,
   X,
+  XCircle,
   ImageIcon,
   Inbox,
   Users,
@@ -535,7 +536,7 @@ export function AdminParticipantsView() {
   useEffect(() => {
     let cancelled = false
     listParticipants()
-      .then(({ participants: all }) => {
+      .then(({ items: all }) => {
         if (!cancelled) setTotalCount(all.length)
       })
       .catch(() => {
@@ -627,7 +628,7 @@ export function AdminParticipantsView() {
     editForm.reset({
       name: p.name,
       category: p.category,
-      videoUrl: p.videoUrl,
+      videoUrl: p.videoUrl ?? undefined,
       bio: p.bio || '',
       eventId: p.eventId || '',
       imageUrl: p.imageUrl || '',

@@ -1,6 +1,7 @@
 import math
 from datetime import datetime, timezone, timedelta
 from typing import Any, List, Optional, Tuple, Type, TypeVar, Generic
+from pydantic import BaseModel
 from sqlalchemy.orm import Session,Query
 from app.models.models import (
     User, Event, Participant, Payment, Activity, 
@@ -11,6 +12,7 @@ from app.enums.enums import (
     EventStatus, ContestantStatus, 
     UserRole, PaymentStatus
 )
+from app.schemas.schemas import EventResponse, ParticipantResponse
 
 
 T = TypeVar("T")
@@ -190,7 +192,7 @@ class ParticipantRepository(BaseRepository[Participant]):
         items = query.offset(offset).limit(limit).all()
         return items, total
     
-    def get_by_competition(self, event_id: str) -> List[Participant]:
+    def get_approved_by_event(self, event_id: str) -> List[Participant]:
         """Get all approved contestants in a specific event (for leaderboard)."""
         query = self.db.query(Participant).filter(
             Participant.event_id == event_id,
@@ -341,6 +343,18 @@ class PaymentMethodConfigRepository(BaseRepository[PaymentMethodConfig]):
 
 # --- Pagination helper ---
 
+def _serialize_paginated_item(item: Any) -> Any:
+    """Serialize paginated response items without changing the response envelope."""
+    if isinstance(item, BaseModel):
+        return item.model_dump(by_alias=True, mode="json")
+    if isinstance(item, dict):
+        return item
+    if isinstance(item, Event):
+        return EventResponse.model_validate(item).model_dump(by_alias=True, mode="json")
+    if isinstance(item, Participant):
+        return ParticipantResponse.model_validate(item).model_dump(by_alias=True, mode="json")
+    return item
+
 def paginate_response(
     items: list[Any],
     total: int,
@@ -361,9 +375,11 @@ def paginate_response(
     """
     total_pages = max(1, math.ceil(total / page_size))
     return {
-        "items": items,
+        "items": [_serialize_paginated_item(item) for item in items],
         "pagination": {
+            "total": total,
             "page": page,
+            "per_page": page_size,
             "pageSize": page_size,
             "totalItems": total,
             "totalPages": total_pages,
@@ -371,6 +387,7 @@ def paginate_response(
             "hasPrev": page > 1,
         }
     }
+
 
 
 class TestPaymentRepository(BaseRepository[TestPayment]):

@@ -1,5 +1,8 @@
 import os
 import sys
+from decimal import Decimal
+from typing import Any
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from dotenv import load_dotenv
 
@@ -15,6 +18,14 @@ def _require_env(name: str) -> str:
     return val
 
 
+def _parse_debug(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+
+    normalized = str(value or "").strip().lower()
+    return normalized in ("true", "1", "yes", "on")
+
+
 class Settings(BaseSettings):
     """
     Application configurations managed via pydantic-settings.
@@ -24,7 +35,12 @@ class Settings(BaseSettings):
 
     PROJECT_NAME: str = os.getenv("PROJECT_NAME", "Digital Entertainment Voting Platform API")
     API_V1_STR: str = os.getenv("API_V1_STR", "/api/v1")
-    DEBUG: bool = os.getenv("DEBUG", "false").lower() in ("true", "1", "yes")
+    DEBUG: bool = _parse_debug(os.getenv("DEBUG", "false"))
+
+    @field_validator("DEBUG", mode="before")
+    @classmethod
+    def parse_debug(cls, value: Any) -> bool:
+        return _parse_debug(value)
 
     # Database
     DATABASE_URL: str = os.getenv("DATABASE_URL","")
@@ -97,7 +113,7 @@ class Settings(BaseSettings):
     R2_PUBLIC_URL: str = os.getenv("R2_PUBLIC_URL", "")
 
     # Payment Configuration
-    MIN_PAYMENT_AMOUNT: float = float(os.getenv("MIN_PAYMENT_AMOUNT", "0.5"))  # $0.50 minimum
+    MIN_PAYMENT_AMOUNT: Decimal = Decimal(os.getenv("MIN_PAYMENT_AMOUNT", "0.5"))  # $0.50 minimum
 
     # Cheat Mode Configuration
     CHEAT_MODE_ENABLED: bool = os.getenv("CHEAT_MODE_ENABLED", "false").lower() in ("true", "1", "yes")

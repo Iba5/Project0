@@ -127,7 +127,7 @@ def get_payment_method_availability(
             "reason": "Event is not published"
         }
     
-    if computed_status == "Registration Open":
+    if computed_status == "registration_open":
         return {
             "registration_open": True,
             "voting_open": False,
@@ -135,7 +135,7 @@ def get_payment_method_availability(
             "reason": "Registration period is open"
         }
     
-    if computed_status == "Voting Open":
+    if computed_status == "voting_open":
         return {
             "registration_open": False,
             "voting_open": True,

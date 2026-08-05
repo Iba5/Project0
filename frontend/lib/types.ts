@@ -85,7 +85,6 @@ export type ParticipantRecord = {
   status: ContestantStatus
   votes: number
   eventId: string
-  competitionId: string | null
 }
 
 export type PaymentRecord = {
@@ -151,15 +150,6 @@ export type AuthResult = {
     role: UserRole
   }
   message: string
-}
-
-export type DashboardSummary = {
-  activeEvent: string
-  totalParticipants: number
-  totalVotes: number
-  totalRevenue: string
-  recentPayments: PaymentRecord[]
-  recentActivity: ActivityRecord[]
 }
 
 export type SettingsProfile = {

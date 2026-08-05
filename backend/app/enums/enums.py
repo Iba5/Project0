@@ -25,6 +25,7 @@ class EventStatus(str, Enum):
 
 class ContestantStatus(str, Enum):
     APPROVED = "approved"
+    REJECTED = "rejected"
     DISQUALIFIED = "disqualified"
 
 class PaymentStatus(str, Enum):

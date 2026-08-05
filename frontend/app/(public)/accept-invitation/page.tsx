@@ -1,109 +1,128 @@
 'use client'
 
-import { useState } from 'react'
+import { Suspense, useMemo, useState, useEffect } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  ArrowLeft,
   Mail,
   Lock,
   Eye,
   EyeOff,
-  KeyRound,
-  CheckCircle2,
+  UserPlus,
   Sparkles,
   ShieldCheck,
+  AlertCircle,
+  CheckCircle2,
+  ArrowLeft,
 } from 'lucide-react'
-import { useAppStore } from '@/lib/store'
-import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
-import { apiFetch } from '@/lib/api-client'
-import { resetPassword as apiResetPassword } from '@/lib/api'
+import { verifyInvitation, completeSignup } from '@/lib/api'
+import { storeToken } from '@/lib/api-client'
 
-type Step = 'email' | 'reset' | 'success'
+type Step = 'verify' | 'complete' | 'success'
 
-type AdminForgotPasswordViewProps = {
-  initialToken?: string
-  initialEmail?: string
-}
-
-export function AdminForgotPasswordView({ initialToken = '', initialEmail = '' }: AdminForgotPasswordViewProps) {
+function AcceptInvitationContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
 
-  // Step management
-  const [step, setStep] = useState<Step>(initialToken ? 'reset' : 'email')
+  const [step, setStep] = useState<Step>('verify')
+  const [loading, setLoading] = useState(false)
 
-  // Email step
-  const [email, setEmail] = useState(initialEmail)
-  const [emailLoading, setEmailLoading] = useState(false)
+  // Token from URL
+  const token = useMemo(() => searchParams?.get('token') || '', [searchParams])
 
-  // Reset step
-  const [token, setToken] = useState(initialToken)
-  const [newPassword, setNewPassword] = useState('')
+  // Form state
+  const [invitationData, setInvitationData] = useState<{
+    email: string
+    role: string
+    valid: boolean
+  } | null>(null)
+
+  const [name, setName] = useState('')
+  const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
-  const [resetLoading, setResetLoading] = useState(false)
 
-  // ── Step 1: Request reset ───────────────────────────────────────
-  const handleRequestReset = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!email.trim()) {
-      toast.error('Email required', { description: 'Please enter your email address.' })
+  // ── Step 1: Verify Invitation ───────────────────────────────────
+  const handleVerifyInvitation = async () => {
+    if (!token.trim()) {
+      toast.error('Invalid invitation link', { description: 'Missing or invalid token in URL.' })
       return
     }
 
-    setEmailLoading(true)
+    setLoading(true)
     try {
-      await apiFetch<{ message?: string }>('/auth/forgot-password', {
-        method: 'POST',
-        body: JSON.stringify({ email: email.trim() }),
-      })
+      const data = await verifyInvitation(token)
 
-      toast.success('Reset link sent', {
-        description: 'Check your inbox and open the email link to continue.',
-      })
+      if (data.valid) {
+        setInvitationData({
+          email: data.email,
+          role: data.role,
+          valid: true,
+        })
+        setStep('complete')
+      } else {
+        toast.error('Invalid invitation', { description: 'This invitation link is invalid or has expired.' })
+      }
     } catch (err) {
-      toast.error('Request failed', { description: err instanceof Error ? err.message : 'Something went wrong.' })
+      toast.error('Verification failed', {
+        description: err instanceof Error ? err.message : 'Could not verify invitation.',
+      })
     } finally {
-      setEmailLoading(false)
+      setLoading(false)
     }
   }
 
-  // ── Step 2: Reset password ──────────────────────────────────────
-  const handleResetPassword = async (e: React.FormEvent) => {
+  // Auto-verify on mount if token present
+  useEffect(() => {
+    if (token.trim()) {
+      handleVerifyInvitation()
+    }
+  }, [token])
+
+  // ── Step 2: Complete Signup ───────────────────────────────────────
+  const handleCompleteSignup = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (!token.trim()) {
-      toast.error('Token required', { description: 'Please enter the reset token.' })
+    if (!name.trim()) {
+      toast.error('Name required', { description: 'Please enter your full name.' })
       return
     }
-    if (newPassword.length < 8) {
+    if (password.length < 8) {
       toast.error('Password too short', { description: 'Password must be at least 8 characters.' })
       return
     }
-    if (newPassword !== confirmPassword) {
+    if (password !== confirmPassword) {
       toast.error('Passwords do not match', { description: 'Please make sure both passwords are identical.' })
       return
     }
 
-    setResetLoading(true)
+    setLoading(true)
     try {
-      await apiResetPassword(token.trim(), newPassword)
+      const data = await completeSignup(token.trim(), name.trim(), password)
+
+      // Store the token
+      if (data.token) {
+        storeToken(data.token)
+      }
 
       setStep('success')
-      toast.success('Password reset!', {
-        description: 'You can now sign in with your new password.',
+      toast.success('Account activated!', {
+        description: 'Your admin account has been created successfully.',
       })
     } catch (err) {
-      toast.error('Reset failed', { description: err instanceof Error ? err.message : 'Something went wrong.' })
+      toast.error('Signup failed', {
+        description: err instanceof Error ? err.message : 'Could not complete signup.',
+      })
     } finally {
-      setResetLoading(false)
+      setLoading(false)
     }
   }
 
-  // ── Shared card wrapper style ───────────────────────────────────
+  // ── Card wrapper style ───────────────────────────────────────
   const cardStyle = {
     background: 'rgba(18, 24, 36, 0.8)',
     backdropFilter: 'blur(20px)',
@@ -169,42 +188,123 @@ export function AdminForgotPasswordView({ initialToken = '', initialEmail = '' }
                 boxShadow: '0 0 20px rgba(245, 158, 11, 0.2)',
               }}
             >
-              <KeyRound className="w-7 h-7 text-white" />
+              <UserPlus className="w-7 h-7 text-white" />
             </div>
             <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-              Reset Password
+              Accept Invitation
             </h1>
             <p className="text-sm mt-1 text-center" style={{ color: 'var(--text-muted)' }}>
-              {step === 'email' && 'Enter your email to receive a reset link'}
-              {step === 'reset' && 'Use the link from your email to set a new password'}
-              {step === 'success' && 'Your password has been reset!'}
+              {step === 'verify' && 'Verifying your invitation...'}
+              {step === 'complete' && 'Complete your admin account setup'}
+              {step === 'success' && 'Your account is ready!'}
             </p>
           </div>
 
           <AnimatePresence mode="wait">
-            {/* ── Step 1: Email ─────────────────────────────────── */}
-            {step === 'email' && (
-              <motion.form
-                key="email-step"
+            {/* ── Step 1: Verification ─────────────────────────────── */}
+            {step === 'verify' && (
+              <motion.div
+                key="verify-step"
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 20 }}
                 transition={{ duration: 0.2 }}
-                onSubmit={handleRequestReset}
+                className="text-center space-y-5"
+              >
+                {!token ? (
+                  <div
+                    className="rounded-xl p-4 flex items-start gap-3"
+                    style={{
+                      background: 'rgba(239, 68, 68, 0.08)',
+                      border: '1px solid rgba(239, 68, 68, 0.2)',
+                    }}
+                  >
+                    <AlertCircle className="w-5 h-5 mt-0.5 shrink-0" style={{ color: '#EF4444' }} />
+                    <p className="text-sm font-semibold" style={{ color: '#FCA5A5' }}>
+                      Invalid invitation link. Missing token parameter.
+                    </p>
+                  </div>
+                ) : loading ? (
+                  <div className="flex flex-col items-center gap-4">
+                    <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+                    <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+                      Verifying invitation...
+                    </p>
+                  </div>
+                ) : (
+                  <div
+                    className="rounded-xl p-4 flex items-start gap-3"
+                    style={{
+                      background: 'rgba(239, 68, 68, 0.08)',
+                      border: '1px solid rgba(239, 68, 68, 0.2)',
+                    }}
+                  >
+                    <AlertCircle className="w-5 h-5 mt-0.5 shrink-0" style={{ color: '#EF4444' }} />
+                    <p className="text-sm font-semibold" style={{ color: '#FCA5A5' }}>
+                      Invitation verification failed. The link may be invalid or expired.
+                    </p>
+                  </div>
+                )}
+
+                <Button
+                  onClick={() => router.push('/admin/login')}
+                  className="w-full rounded-full py-3 text-base font-semibold"
+                  style={{
+                    background: 'linear-gradient(135deg, #F59E0B, #D97706)',
+                    color: '#0B0F17',
+                  }}
+                >
+                  Go to Sign In
+                </Button>
+              </motion.div>
+            )}
+
+            {/* ── Step 2: Complete Signup ─────────────────────────────── */}
+            {step === 'complete' && invitationData && (
+              <motion.form
+                key="complete-step"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                transition={{ duration: 0.2 }}
+                onSubmit={handleCompleteSignup}
                 className="space-y-5"
               >
+                {/* Invitation Details */}
+                <div
+                  className="rounded-xl p-4 space-y-2"
+                  style={{
+                    background: 'rgba(34, 197, 94, 0.08)',
+                    border: '1px solid rgba(34, 197, 94, 0.2)',
+                  }}
+                >
+                  <div className="flex items-center gap-2">
+                    <Mail className="w-4 h-4" style={{ color: '#22C55E' }} />
+                    <span className="text-sm" style={{ color: '#86EFAC' }}>
+                      {invitationData.email}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4" style={{ color: '#22C55E' }} />
+                    <span className="text-sm capitalize" style={{ color: '#86EFAC' }}>
+                      Role: {invitationData.role}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Name */}
                 <div className="space-y-2">
-                  <Label htmlFor="reset-email" style={{ color: 'var(--text-muted)' }}>
-                    Email Address
+                  <Label htmlFor="signup-name" style={{ color: 'var(--text-muted)' }}>
+                    Full Name
                   </Label>
                   <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: 'var(--text-muted)' }} />
+                    <UserPlus className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: 'var(--text-muted)' }} />
                     <Input
-                      id="reset-email"
-                      type="email"
-                      placeholder="admin@vibehub.com"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
+                      id="signup-name"
+                      type="text"
+                      placeholder="Your full name"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
                       required
                       className="pl-10 rounded-xl border-none"
                       style={inputStyle}
@@ -212,73 +312,19 @@ export function AdminForgotPasswordView({ initialToken = '', initialEmail = '' }
                   </div>
                 </div>
 
-                <Button
-                  type="submit"
-                  disabled={emailLoading}
-                  className="w-full rounded-full py-3 text-base font-semibold"
-                  style={{
-                    background: 'linear-gradient(135deg, #F59E0B, #D97706)',
-                    color: '#0B0F17',
-                  }}
-                >
-                  {emailLoading ? 'Sending…' : 'Send Reset Link'}
-                </Button>
-
-                <button
-                  type="button"
-                  onClick={() => router.push('/admin/login')}
-                  className="w-full text-sm hover:underline text-center"
-                  style={{ color: '#F59E0B' }}
-                >
-                  Back to Sign In
-                </button>
-              </motion.form>
-            )}
-
-            {/* ── Step 2: Reset ─────────────────────────────────── */}
-            {step === 'reset' && (
-              <motion.form
-                key="reset-step"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                transition={{ duration: 0.2 }}
-                onSubmit={handleResetPassword}
-                className="space-y-4"
-              >
-                {/* Token field */}
+                {/* Password */}
                 <div className="space-y-2">
-                  <Label htmlFor="reset-token" style={{ color: 'var(--text-muted)' }}>
-                    Reset Link Token
-                  </Label>
-                  <div className="relative">
-                    <Sparkles className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: 'var(--text-muted)' }} />
-                    <Input
-                      id="reset-token"
-                      type="text"
-                      placeholder="Token from your email link"
-                      value={token}
-                      onChange={(e) => setToken(e.target.value)}
-                      required
-                      className="pl-10 rounded-xl border-none font-mono text-sm"
-                      style={inputStyle}
-                    />
-                  </div>
-                </div>
-
-                {/* New password */}
-                <div className="space-y-2">
-                  <Label htmlFor="new-password" style={{ color: 'var(--text-muted)' }}>
-                    New Password
+                  <Label htmlFor="signup-password" style={{ color: 'var(--text-muted)' }}>
+                    Password
                   </Label>
                   <div className="relative">
                     <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: 'var(--text-muted)' }} />
                     <Input
-                      id="new-password"
+                      id="signup-password"
                       type={showPassword ? 'text' : 'password'}
                       placeholder="Min 8 characters"
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
                       required
                       minLength={8}
                       className="pl-10 pr-10 rounded-xl border-none"
@@ -295,17 +341,17 @@ export function AdminForgotPasswordView({ initialToken = '', initialEmail = '' }
                   </div>
                 </div>
 
-                {/* Confirm password */}
+                {/* Confirm Password */}
                 <div className="space-y-2">
-                  <Label htmlFor="confirm-new-password" style={{ color: 'var(--text-muted)' }}>
+                  <Label htmlFor="signup-confirm" style={{ color: 'var(--text-muted)' }}>
                     Confirm Password
                   </Label>
                   <div className="relative">
                     <CheckCircle2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: 'var(--text-muted)' }} />
                     <Input
-                      id="confirm-new-password"
+                      id="signup-confirm"
                       type={showPassword ? 'text' : 'password'}
-                      placeholder="Re-enter your new password"
+                      placeholder="Re-enter your password"
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       required
@@ -318,28 +364,19 @@ export function AdminForgotPasswordView({ initialToken = '', initialEmail = '' }
 
                 <Button
                   type="submit"
-                  disabled={resetLoading}
+                  disabled={loading}
                   className="w-full rounded-full py-3 text-base font-semibold"
                   style={{
                     background: 'linear-gradient(135deg, #F59E0B, #D97706)',
                     color: '#0B0F17',
                   }}
                 >
-                  {resetLoading ? 'Resetting…' : 'Reset Password'}
+                  {loading ? 'Creating account…' : 'Complete Setup'}
                 </Button>
-
-                <button
-                  type="button"
-                  onClick={() => setStep('email')}
-                  className="w-full text-sm hover:underline text-center"
-                  style={{ color: '#F59E0B' }}
-                >
-                  Need another link? Try again
-                </button>
               </motion.form>
             )}
 
-            {/* ── Step 3: Success ───────────────────────────────── */}
+            {/* ── Step 3: Success ─────────────────────────────────── */}
             {step === 'success' && (
               <motion.div
                 key="success-step"
@@ -359,21 +396,21 @@ export function AdminForgotPasswordView({ initialToken = '', initialEmail = '' }
                 </div>
                 <div>
                   <h2 className="text-lg font-bold mb-1" style={{ color: 'var(--text-primary)' }}>
-                    Password Reset Complete
+                    Account Created Successfully
                   </h2>
                   <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-                    Your password has been updated successfully. You can now sign in with your new credentials.
+                    Your admin account has been activated. You can now sign in with your credentials.
                   </p>
                 </div>
                 <Button
-                  onClick={() => router.push('/admin/login')}
+                  onClick={() => router.push('/admin/dashboard')}
                   className="w-full rounded-full py-3 text-base font-semibold"
                   style={{
                     background: 'linear-gradient(135deg, #F59E0B, #D97706)',
                     color: '#0B0F17',
                   }}
                 >
-                  Sign In Now
+                  Go to Dashboard
                 </Button>
               </motion.div>
             )}
@@ -386,5 +423,13 @@ export function AdminForgotPasswordView({ initialToken = '', initialEmail = '' }
         </p>
       </motion.div>
     </div>
+  )
+}
+
+export default function AcceptInvitationPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen" style={{ background: '#0B0F17' }} />}>
+      <AcceptInvitationContent />
+    </Suspense>
   )
 }

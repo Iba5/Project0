@@ -1,5 +1,7 @@
 from datetime import datetime
-from typing import List, Optional, TypeVar, Generic
+from decimal import Decimal
+from typing import List, Optional, TypeVar, Generic, Dict, Any
+from uuid import UUID
 from pydantic import BaseModel, EmailStr, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
 from app.enums.enums import (
@@ -20,6 +22,9 @@ class PaginationMeta(BaseModel):
     total_pages: int
     has_next: bool
     has_prev: bool
+    total: Optional[int] = None
+    per_page: Optional[int] = None
+
 
 class AcceptInvitationBody(BaseModel):
     token: str
@@ -149,11 +154,22 @@ class EventUpdate(CamelModel):
 
 class EventResponse(EventBase):
     id: str
+    event_id: Optional[str] = None
     computed_status: Optional[str] = None  # Computed runtime status
+    created_at: Optional[datetime] = None
+    deleted_at: Optional[datetime] = None
+    participant_count: Optional[int] = None
 
 # --- Participant / Contestant Schemas ---
 
 class ParticipantBase(CamelModel):
+    """Common read-only fields shared by all participant schemas.
+
+    event_id is intentionally absent here: ParticipantCreate needs it
+    as a required str, while ParticipantResponse needs it as Optional[str].
+    Declaring the same mutable attribute with different types in a parent
+    and child violates LSP and triggers a Pyrefly bad-override error.
+    """
     name: str
     category: str
     video_url: Optional[str] = None  # Optional promotional video
@@ -161,14 +177,25 @@ class ParticipantBase(CamelModel):
     bio: Optional[str] = None  # Biography
     status: ContestantStatus = ContestantStatus.APPROVED
     votes: int = 0
-    event_id: str  # Required for participant creation
 
 class ParticipantCreate(ParticipantBase):
-    pass  # event_id is now required
+    event_id: str  # Required: every new participant must belong to an event
 
 class ParticipantResponse(ParticipantBase):
     id: str
+    event_id: Optional[str] = None  # Optional: ORM rows may have NULL event_id
+    thumbnail_url: Optional[str] = None
+    created_at: Optional[datetime] = None
+    deleted_at: Optional[datetime] = None
+
+class ParticipantUpdate(CamelModel):
+    name: Optional[str] = None
+    category: Optional[str] = None
+    video_url: Optional[str] = None
+    image_url: Optional[str] = None
+    bio: Optional[str] = None
     event_id: Optional[str] = None
+    status: Optional[ContestantStatus] = None
 
 # --- Payment Schemas ---
 
@@ -178,6 +205,25 @@ class PaymentBase(CamelModel):
     payment_method: str
     status: PaymentStatus = PaymentStatus.CREATED
     date: datetime
+class PaymentSummaryResponse(CamelModel):
+    id: Optional[str] = None
+    reference: Optional[str] = None
+    contestant_id: Optional[str] = None
+    amount: Optional[str] = None
+    payment_method: Optional[str] = None
+    status: Optional[str] = None
+    voter_name: Optional[str] = None
+    voter_email: Optional[str] = None
+    date: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    poll_url: Optional[str] = None
+    redirect_url: Optional[str] = Field(None, alias="paynowRedirectUrl")
+    instructions: Optional[str] = None
+    test_mode: bool = False
+
+class PaymentEnvelopeResponse(CamelModel):
+    payment: PaymentSummaryResponse
+    idempotent: bool = False
 
 class PaymentCreate(CamelModel):
     contestant_id: str
@@ -199,7 +245,6 @@ class PaymentCreate(CamelModel):
             raise ValueError("Invalid phone number format")
         return cleaned
 
-
 class PaymentResponse(CamelModel):
     id: str
     reference: str
@@ -211,6 +256,36 @@ class PaymentResponse(CamelModel):
     # NOTE: voter_phone and voter_email are intentionally NOT exposed here
     # for data privacy. They exist in the DB but are not in public responses.
 
+class PaymentInitiationResponse(CamelModel):
+    id: Optional[str] = None
+
+    warning: Optional[str] = None
+    has_voted: bool = False
+
+    reference: Optional[str] = None
+    redirect_url: Optional[str] = None
+    instructions: Optional[str] = None
+    poll_url: Optional[str] = None
+
+    amount: Optional[str] = None
+    payment_method: Optional[str] = None
+    status: Optional[str] = None
+
+    contestant_id: Optional[str] = None
+
+    voter_name: Optional[str] = None
+    voter_email: Optional[str] = None
+
+    date: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+
+    idempotent: bool = False
+    test_mode: bool = False
+
+
+class SimpleMessageResponse(CamelModel):
+    success: bool
+    message: str
 
 class VoterCheckResponse(CamelModel):
     """Response for pre-payment voter duplicate check."""
@@ -231,6 +306,67 @@ class PaymentStatusCheckResponse(CamelModel):
     reference: str
     status: PaymentStatus
     paid: bool
+
+
+class CallbackAckResponse(CamelModel):
+    """Minimal acknowledgement returned to the Paynow webhook caller.
+    The gateway ignores the body; this exists purely so the endpoint
+    has a declared contract and appears correctly in OpenAPI docs."""
+    status: str
+
+
+class PaymentListResponse(BaseModel):
+    """Envelope for the paginated payment list endpoint.
+
+    Items arrive from PaymentService.list_payments() as pre-serialised
+    camelCase dicts (e.g. contestantId, paymentMethod).  Using plain
+    BaseModel — NOT CamelModel — to avoid the alias generator
+    mangling keys that are already in the correct format.
+    """
+    items: List[Any]
+    payments: List[Any]
+    pagination: PaginationMeta
+
+
+
+class TestPaymentItemResponse(CamelModel):
+    """Single test-payment record returned by the dev list endpoint."""
+    reference: str
+    contestant_id: Optional[str] = None
+    amount: str
+    payment_method: str
+    status: str
+    voter_phone: Optional[str] = None
+    voter_email: Optional[str] = None
+    event_id: Optional[str] = None
+    test_redirect_url: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    auto_complete: bool = True
+    test_completion_delay: int = 5
+
+
+class TestPaymentListResponse(CamelModel):
+    """Response envelope for GET /payments/test/list."""
+    test_payments: List[TestPaymentItemResponse]
+    total: int
+
+
+class TestPaymentCompleteResponse(CamelModel):
+    """Response for POST /payments/test/{reference}/complete."""
+    status: str
+    reference: str
+    contestant_name: str
+    amount: str
+    votes_awarded: int
+    test_mode: bool = True
+
+
+class TestPaymentCleanupResponse(CamelModel):
+    """Response for DELETE /payments/test/cleanup."""
+    status: str
+    deleted_count: int
+    message: str
 
 # --- Vote Transaction Schemas ---
 
@@ -260,15 +396,66 @@ class ActivityResponse(CamelModel):
     time: datetime
 
 # --- Dashboard Schemas ---
+class DashboardPaymentResponse(CamelModel):
+    id: str
+    reference: str
+    amount: float
+    payment_method: str
+    status: PaymentStatus
+    created_at: datetime
+
+class RevenueTrendPoint(CamelModel):
+    date: str
+    total: float
+
+class VotesByCategoryPoint(CamelModel):
+    category: str
+    votes: int
+
+class TopPaymentMethodPoint(CamelModel):
+    method: str
+    count: int
+    percentage: float
+
+class VoteTrendPoint(CamelModel):
+    date: str
+    votes: int
+
+class TopPerformerEntry(CamelModel):
+    id: str
+    name: str
+    votes: int
+
+class EnhancedActivityEntry(CamelModel):
+    id: str
+    title: str
+    detail: Optional[str] = None
+    time: datetime
+
+class DashboardActiveEvent(CamelModel):
+    id: str
+    name: str
+    status: str
 
 class DashboardSummaryResponse(CamelModel):
-    active_event: str
+    active_event: Optional[DashboardActiveEvent] = None
+
     total_participants: int
     total_votes: int
-    total_revenue: str
-    recent_payments: List[PaymentResponse]
+    total_revenue: float
+
+    recent_payments: List[DashboardPaymentResponse]
     recent_activity: List[ActivityResponse]
 
+    range: str
+    date_from: Optional[str] = None
+
+    revenue_trend: List[RevenueTrendPoint]
+    votes_by_category: List[VotesByCategoryPoint]
+    top_payment_methods: List[TopPaymentMethodPoint]
+    vote_trend: List[VoteTrendPoint]
+    top_performers: List[TopPerformerEntry]
+    enhanced_recent_activity: List[EnhancedActivityEntry]
 # --- Settings Schemas ---
 
 class NotificationPreferences(CamelModel):

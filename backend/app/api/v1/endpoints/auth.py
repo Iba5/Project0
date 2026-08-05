@@ -322,9 +322,10 @@ def google_auth_placeholder() -> dict[str, bool | str]:
 def verify_invitation(
     token: str,
     db: Session = Depends(get_db),
-    ) -> dict[str, bool | str]:
-        auth_service = AuthService(db)
+) -> dict[str, bool | str]:
+    auth_service = AuthService(db)
 
+    try:
         invitation = auth_service.verify_invitation_token(token)
 
         return {
@@ -333,6 +334,13 @@ def verify_invitation(
             "role": invitation.role.value
             if hasattr(invitation.role, "value")
             else invitation.role,
+        }
+    except Exception as e:
+        # Handle invalid or expired invitations
+        return {
+            "valid": False,
+            "email": "",
+            "role": ""
         }
 
 

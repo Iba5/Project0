@@ -6,7 +6,7 @@ from app.core.database import get_db
 from app.api.v1.dependencies import PermissionChecker, get_current_active_user, PaginationParams
 from app.enums.enums import Permission, ContestantStatus
 from app.services.services import ParticipantService
-from app.schemas.schemas import ParticipantCreate, ParticipantResponse
+from app.schemas.schemas import ParticipantCreate, ParticipantResponse, ParticipantUpdate
 from app.repositories.repositories import paginate_response
 from app.models.models import User
 
@@ -25,17 +25,12 @@ def list_public_participants(
     """Public endpoint - returns approved participants only"""
     part_service = ParticipantService(db)
 
-    # Use synchronous version for now (async version requires event loop)
     items, total = part_service.list_participants(
         search, ContestantStatus.APPROVED, event_id, pagination.offset, pagination.limit
     )
 
-    return paginate_response(
-        items,
-        total,
-        pagination.page,
-        pagination.page_size,
-    )
+    serialized = [ParticipantResponse.model_validate(p).model_dump(by_alias=True) for p in items]
+    return paginate_response(serialized, total, pagination.page, pagination.page_size)
 
 @router.get(
     "/",
@@ -56,7 +51,8 @@ def list_participants(
         search, status, event_id,
         pagination.offset, pagination.limit
     )
-    return paginate_response(items, total, pagination.page, pagination.page_size)
+    serialized = [ParticipantResponse.model_validate(p).model_dump(by_alias=True) for p in items]
+    return paginate_response(serialized, total, pagination.page, pagination.page_size)
 
 
 # C4 FIX: /leaderboard, /compare, /bulk MUST be registered before /{part_id}
@@ -114,6 +110,9 @@ def bulk_update_participants(
         elif action == "reject":
             part_service.update_participant_status(pid, ContestantStatus.REJECTED)
             count += 1
+        elif action == "disqualify":
+            part_service.update_participant_status(pid, ContestantStatus.DISQUALIFIED)
+            count += 1
         elif action == "delete":
             part_service.delete_participant(pid)
             count += 1
@@ -141,8 +140,8 @@ def get_participant_vote_history(
     db: Session = Depends(get_db)
 ):
     # Simulated/computed daily vote history for charts
-    from datetime import datetime, timedelta
-    today = datetime.utcnow().date()
+    from datetime import datetime, timedelta, timezone
+    today = datetime.now(timezone.utc).date()
     history = []
     cumulative = 0
     for i in range(days - 1, -1, -1):
@@ -159,6 +158,7 @@ def get_participant_vote_history(
 
 @router.post(
     "/",
+    response_model=dict[str, ParticipantResponse],
     status_code=status.HTTP_201_CREATED,
     summary="Create a new contestant"
 )
@@ -169,25 +169,40 @@ def create_participant(
 ):
     part_service = ParticipantService(db, user_id=current_user.id)
     created = part_service.create_participant(part_in)
-    return {"participant": created}
+    return {
+        "participant": ParticipantResponse.model_validate(created).model_dump(by_alias=True)
+    }
 
 
 @router.patch(
     "/{part_id}",
-    response_model=ParticipantResponse,
+    response_model=dict[str, ParticipantResponse],
     summary="Update contestant details"
 )
 def update_participant(
     part_id: str,
-    payload: dict,
+    part_in: ParticipantUpdate,
     current_user: User = allow_update,
     db: Session = Depends(get_db)
 ):
     part_service = ParticipantService(db, user_id=current_user.id)
-    if "status" in payload:
-        st_val = ContestantStatus(payload["status"])
-        return part_service.update_participant_status(part_id, st_val)
-    return part_service.get_participant(part_id)
+    participant = part_service.get_participant(part_id)
+    if participant is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Participant not found")
+
+    update_data = part_in.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        if field != "status":
+            setattr(participant, field, value)
+
+    if "status" in update_data:
+        participant.status = update_data["status"]
+
+    part_service.part_repo.update()
+    return {
+        "participant": ParticipantResponse.model_validate(participant).model_dump(by_alias=True)
+    }
 
 
 @router.patch(

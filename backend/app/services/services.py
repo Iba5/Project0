@@ -1,13 +1,14 @@
 import logging
 import uuid
 from datetime import datetime, timezone, timedelta
+from decimal import Decimal
 from typing import List, Optional, Dict, Any, Tuple
 from sqlalchemy import select, update as sa_update, func
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from app.models.models import (
-    User, Event, Participant, Payment, Competition, AuditLog, VoteTransaction,
+    User, Event, Participant, Payment, AuditLog, VoteTransaction,
     PaymentMethodConfig, TestPayment
 )
 from app.enums.enums import (
@@ -16,16 +17,16 @@ from app.enums.enums import (
 from app.repositories.repositories import (
     UserRepository, EventRepository, ParticipantRepository,
     PaymentRepository, ActivityRepository,
-    SettingsRepository, VoteTransactionRepository, CompetitionRepository,
+    SettingsRepository, VoteTransactionRepository,
     PaymentMethodConfigRepository, TestPaymentRepository
 )
 from app.core.security import hash_password, verify_password, create_access_token, create_refresh_token
 from app.exceptions.exceptions import ValidationException, NotFoundException, PaymentException
 from app.schemas.schemas import (
-    UserRegister, UserLogin, AuthResult, UserResponse,
+    PaymentInitiationResponse, SimpleMessageResponse, UserRegister, UserLogin, AuthResult, UserResponse,
     EventCreate, EventUpdate, ParticipantCreate, PaymentCreate, SettingsProfileUpdate,
     ResetPasswordRequest, AdminInvitationRequest, AdminInvitationResponse,
-    InvalidateAdminRequest, CompetitionCreate, CompetitionUpdate,
+    InvalidateAdminRequest,
     VoterCheckResponse, VoterDetailsUpdate, PaymentStatusCheckResponse,
     PaymentMethodConfigCreate, PaymentMethodConfigUpdate
 )
@@ -38,6 +39,7 @@ from app.exceptions.exceptions import (
 )
 from app.utils.email import email_service
 from app.core.config import settings
+from app.core.cache import get_cache_service
 
 logger = logging.getLogger(__name__)
 
@@ -480,7 +482,19 @@ class DashboardService:
     def get_summary(self) -> Dict[str, Any]:
         try:
             active_event = self.event_repo.get_active_event()
-            active_event_name = active_event.name if active_event else "No Active Event"
+            active_event_data = (
+                {
+                    "id": active_event.id,
+                    "name": active_event.name,
+                    "status": (
+                        active_event.status.value
+                        if hasattr(active_event.status, "value")
+                        else str(active_event.status)
+                    ),
+                }
+                if active_event
+                else None
+            )
 
             # H1 FIX: Use SQL COUNT/SUM instead of loading all rows into Python
             total_participants = self.db.query(func.count(Participant.id)).filter(
@@ -506,48 +520,70 @@ class DashboardService:
                 contestants_map = {c.id: c.name for c in batch}
 
             recent_payments: List[Dict[str, Any]] = []
-            for p in recent_payment_rows:
-                participant_name = contestants_map.get(p.contestant_id, "Unknown") if p.contestant_id else "Unknown"
+            for payment in recent_payment_rows:
+                participant_name = contestants_map.get(payment.contestant_id, "Unknown") if payment.contestant_id else "Unknown"
 
                 recent_payments.append({
-                    "id": p.id,
-                    "reference": p.reference,
-                    "contestant": participant_name,
-                    "amount": f"${float(p.amount):.2f}",
-                    "paymentMethod": p.payment_method,
-                    "status": p.status,
-                    "date": p.date,
+                    "id": payment.id,
+                    "reference": payment.reference,
+                    "amount": float(payment.amount),
+                    "status": (
+                        payment.status.value
+                        if hasattr(payment.status, "value")
+                        else payment.status
+                    ),
+                    "paymentMethod": payment.payment_method,
+                    "createdAt": payment.created_at.isoformat(),
                 })
 
             recent_activities = self.activity_repo.get_recent(5)
-
+            recent_activity = [
+                {
+                "id": activity.id,
+                "title": activity.title,
+                "detail": activity.detail,
+                "time": activity.time.isoformat(),
+                }
+                for activity in recent_activities
+            ]
             return {
-                "activeEvent": active_event_name,
+                "activeEvent": active_event_data,
                 "totalParticipants": total_participants,
                 "totalVotes": total_votes,
-                "totalRevenue": f"${total_revenue_num:.2f}",
+                "totalRevenue": float(total_revenue_num),
                 "recentPayments": recent_payments,
-                "recentActivity": recent_activities,
+                "recentActivity": recent_activity,
+                "range": "30d",
+                "dateFrom": None,
+
+                "revenueTrend": [],
+                "votesByCategory": [],
+                "topPaymentMethods": [],
+                "voteTrend": [],
+                "topPerformers": [],
+                "enhancedRecentActivity": [],
             }
         except Exception as e:
             logger.error(f"Error fetching dashboard summary: {e}")
             # Return empty data instead of crashing
             return {
-                "activeEvent": "Error loading data",
+                "activeEvent": None,
                 "totalParticipants": 0,
                 "totalVotes": 0,
-                "totalRevenue": "$0.00",
+                "totalRevenue": 0.0,
                 "recentPayments": [],
                 "recentActivity": [],
+
+                "range": "30d",
+                "dateFrom": None,
+
+                "revenueTrend": [],
+                "votesByCategory": [],
+                "topPaymentMethods": [],
+                "voteTrend": [],
+                "topPerformers": [],
+                "enhancedRecentActivity": [],
             }
-
-
-# ---------------------------------------------------------------------------
-# CompetitionService (DEPRECATED - Replaced by EventService)
-# ---------------------------------------------------------------------------
-
-# Note: CompetitionService is no longer used as competitions have been removed
-# in favor of event-based system. This code is kept for reference only.
 
 # ---------------------------------------------------------------------------
 # EventService
@@ -622,10 +658,6 @@ class EventService:
         
         return saved
 
-    def _invalidate_event_cache_async(self):
-        """No longer used - cache invalidation is now synchronous"""
-        pass
-
     def update_event(self, event_id: str, event_in: EventUpdate) -> Event:
         event = self.event_repo.get_by_id(event_id)
         if not event:
@@ -661,7 +693,11 @@ class EventService:
         )
         
         # Invalidate cache after event update
-        self._invalidate_event_cache_async()
+        try:
+            cache_service = get_cache_service()
+            cache_service.invalidate_events()
+        except Exception as e:
+            logger.error(f"Failed to invalidate events cache: {e}")
         
         return event
 
@@ -731,10 +767,6 @@ class EventService:
             cache_service.invalidate_events()
         except Exception as e:
             logger.error(f"Failed to invalidate events cache: {e}")
-
-    def _invalidate_event_cache_async(self):
-        """No longer used - cache invalidation is now synchronous"""
-        pass
 
 
 # ---------------------------------------------------------------------------
@@ -819,7 +851,7 @@ class ParticipantService:
             bio=part_in.bio,
             status=part_in.status,
             votes=part_in.votes,
-            event_id=part_in.event_id,  # Now uses event_id instead of competition_id
+            event_id=part_in.event_id,
         )
         saved = self.part_repo.create(new_part)
 
@@ -830,8 +862,7 @@ class ParticipantService:
             details=f"Created contestant: {saved.name} ({saved.id}) for event: {saved.event_id}"
         )
         
-        # TODO: Re-enable async cache invalidation when event loop is properly configured
-        # self._invalidate_participant_cache_async(saved.id, saved.event_id)
+        self._invalidate_participant_cache(saved.id, saved.event_id)
         
         return saved
 
@@ -851,8 +882,7 @@ class ParticipantService:
             details=f"Contestant status updated from {old_status.value} to {status.value} for {part.name} ({part.id})"
         )
         
-        # TODO: Re-enable async cache invalidation when event loop is properly configured
-        # self._invalidate_participant_cache_async(part_id, part.competition_id)
+        self._invalidate_participant_cache(part_id, part.event_id)
         
         return part
 
@@ -869,26 +899,22 @@ class ParticipantService:
             details=f"Soft deleted contestant: {part.name} ({part.id})"
         )
         
-        # TODO: Re-enable async cache invalidation when event loop is properly configured
-        # self._invalidate_participant_cache_async(part_id, part.competition_id)
+        self._invalidate_participant_cache(part_id, part.event_id)
 
-    def _invalidate_participant_cache_async(self, participant_id: str, competition_id: Optional[str] = None):
-        """Async cache invalidation helper that doesn't block the main operation."""
-        import asyncio
+    def _invalidate_participant_cache(self, participant_id: str, event_id: Optional[str] = None):
+        """Invalidate participant, participant list, and leaderboard caches."""
         from app.core.cache import get_cache_service
-        
-        async def _invalidate():
-            try:
-                cache_service = get_cache_service()
-                await cache_service.invalidate_participant(participant_id)
-                await cache_service.invalidate_participants()  # Also invalidate public participants
-                if competition_id:
-                    await cache_service.invalidate_leaderboard(competition_id)
-            except Exception as e:
-                logger.error(f"Failed to invalidate cache for participant {participant_id}: {e}")
-        
-        # Fire and forget - don't block the main operation
-        asyncio.create_task(_invalidate())
+
+        try:
+            cache_service = get_cache_service()
+            cache_service.invalidate_participant(participant_id)
+            cache_service.invalidate_participants()
+            cache_service.invalidate_leaderboard()
+            if event_id:
+                cache_service.invalidate_participants(event_id)
+                cache_service.invalidate_leaderboard(event_id)
+        except Exception as e:
+            logger.error(f"Failed to invalidate cache for participant {participant_id}: {e}")
 
     def get_leaderboard(self, event_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
@@ -897,7 +923,7 @@ class ParticipantService:
         Only approved participants are shown.
         """
         if event_id:
-            participants = self.part_repo.get_by_competition(event_id)
+            participants = self.part_repo.get_approved_by_event(event_id)
         else:
             all_participants = self.part_repo.get_all()
             participants = [p for p in all_participants if p.status == ContestantStatus.APPROVED]
@@ -961,7 +987,7 @@ class ParticipantService:
 class PaymentService:
     """
     Handles the full payment lifecycle:
-    1. Pre-payment voter duplicate check (by phone + competition)
+    1. Pre-payment voter duplicate check (by phone + event)
     2. Payment initiation via official Paynow SDK (web or mobile)
     3. Webhook callback processing with dual verification (signature + poll_url)
     4. ACID transaction for payment status + vote creation
@@ -1031,12 +1057,12 @@ class PaymentService:
                 "Too many payment attempts. Please wait a few minutes before trying again."
             )
 
-    def initiate_payment(self, payment_in: PaymentCreate, idempotency_key: Optional[str] = None) -> Dict[str, Any]:
+    def initiate_payment(self, payment_in: PaymentCreate, idempotency_key: Optional[str] = None) -> PaymentInitiationResponse:
         """
         INITIATE PAYMENT (Enhanced):
         1. Validates contestant exists
         2. Validates event status and payment eligibility
-        3. Checks voter duplication (phone + competition)
+        3. Checks voter duplication (phone + event)
         4. If duplicate, requires acknowledge_duplicate=True
         5. Rate limits by phone
         6. Checks idempotency to prevent duplicate payments
@@ -1083,14 +1109,13 @@ class PaymentService:
 
         if voter_check.has_voted and not payment_in.acknowledge_duplicate:
             # Return the warning but do NOT proceed with payment
-            return {
-                "warning": voter_check.warning,
-                "has_voted": True,
-                "reference": None,
-                "redirectUrl": None,
-                "instructions": None
-            }
-
+            return PaymentInitiationResponse(
+                warning=voter_check.warning,
+                has_voted=True,
+                reference=None,
+                redirect_url=None,
+                instructions=None,
+            )
         # 4. Rate limiting
         self._rate_limit_check(payment_in.voter_phone)
 
@@ -1100,15 +1125,28 @@ class PaymentService:
             existing = self.payment_repo.get_by_idempotency_key(idempotency_key)
             if existing:
                 logger.info(f"Idempotency: returning existing payment for key {idempotency_key}")
-                return {
-                    "warning": None,
-                    "has_voted": False,
-                    "reference": existing.reference,
-                    "redirectUrl": existing.paynow_redirect_url,
-                    "instructions": None,
-                    "pollUrl": existing.poll_url,
-                }
-
+                return PaymentInitiationResponse(
+                    id=existing.id,
+                    warning=None,
+                    has_voted=False,
+                    reference=existing.reference,
+                    redirect_url=existing.paynow_redirect_url,
+                    instructions=None,
+                    poll_url=existing.poll_url,
+                    amount=str(existing.amount),
+                    payment_method=existing.payment_method,
+                    status=(
+                        existing.status.value
+                        if hasattr(existing.status, "value")
+                        else str(existing.status)
+                    ),
+                    contestant_id=existing.contestant_id,
+                    voter_name=existing.voter_name,
+                    voter_email=existing.voter_email,
+                    date=existing.date,
+                    created_at=existing.created_at,
+                    idempotent=True,
+                )
         # 6. Generate reference
         reference = f"VOTE-{uuid.uuid4().hex[:8].upper()}"
 
@@ -1125,6 +1163,8 @@ class PaymentService:
         
         if not vote_price:
             vote_price = settings.MIN_PAYMENT_AMOUNT
+
+        vote_price = Decimal(str(vote_price))
         
         # Ensure the amount meets the minimum requirement
         if vote_price < settings.MIN_PAYMENT_AMOUNT:
@@ -1144,9 +1184,9 @@ class PaymentService:
 
     def _initiate_test_payment(
         self, payment_in: PaymentCreate, part: Participant, 
-        reference: str, vote_price: float, evt_id: Optional[str],
+        reference: str, vote_price: Decimal, evt_id: Optional[str],
         idempotency_key: Optional[str]
-    ) -> Dict[str, Any]:
+    ) -> PaymentInitiationResponse:
         """
         Create a test payment without calling Paynow SDK.
         Used in development mode for testing payment flows without real money.
@@ -1185,22 +1225,25 @@ class PaymentService:
             details=f"TEST MODE: Payment {reference} for contestant {part.name} (${vote_price})"
         )
         
-        return {
-            "warning": None,
-            "has_voted": False,
-            "reference": reference,
-            "redirectUrl": test_redirect_url,
-            "instructions": None,
-            "pollUrl": None,
-            "amount": str(vote_price),
-            "test_mode": True
-        }
-
+        return PaymentInitiationResponse(
+            id=test_payment.id,
+            reference=test_payment.reference,
+            redirect_url=test_payment.paynow_redirect_url,
+            poll_url=test_payment.poll_url,
+            amount=str(test_payment.amount),
+            payment_method=test_payment.payment_method,
+            status=test_payment.status,
+            contestant_id=test_payment.contestant_id,
+            voter_name=test_payment.voter_name,
+            voter_email=test_payment.voter_email,
+            created_at=test_payment.created_at,
+            test_mode=True,
+        )
     def _initiate_real_payment(
         self, payment_in: PaymentCreate, part: Participant,
-        reference: str, vote_price: float, evt_id: Optional[str],
+        reference: str, vote_price: Decimal, evt_id: Optional[str],
         idempotency_key: Optional[str]
-    ) -> Dict[str, Any]:
+    ) -> PaymentInitiationResponse:
         """
         Create a real payment using Paynow SDK.
         Used in production mode for actual payment processing.
@@ -1282,15 +1325,20 @@ class PaymentService:
         )
 
         # Return response
-        return {
-            "warning": None,
-            "has_voted": False,
-            "reference": reference,
-            "redirectUrl": paynow_response.get("redirect_url"),
-            "instructions": paynow_response.get("instructions"),
-            "pollUrl": paynow_response.get("poll_url"),
-            "amount": str(vote_price)
-        }
+        return PaymentInitiationResponse(
+            id=pending_payment.id,
+            reference=pending_payment.reference,
+            redirect_url=paynow_response.get("redirect_url"),
+            poll_url=paynow_response.get("poll_url"),
+            amount=str(vote_price),
+            payment_method=payment_in.payment_method,
+            status=pending_payment.status,
+            contestant_id=part.id,
+            voter_name=None,
+            voter_email=payment_in.voter_email,
+            created_at=pending_payment.created_at,
+            test_mode=False,
+        )
 
     def process_paynow_callback(self, callback_data: Dict[str, Any]) -> None:
         """
@@ -1365,10 +1413,10 @@ class PaymentService:
                 # Previously used int(payment.amount) — a monetary value —
                 # compared against MAX_VOTES_PER_TRANSACTION.
                 votes_to_add = 1
-                if payment.competition_id:
-                    comp = self.comp_repo.get_by_id(payment.competition_id)
-                    if comp:
-                        votes_to_add = comp.votes_per_payment
+                if payment.event_id:
+                    event = self.event_repo.get_by_id(payment.event_id)
+                    if event:
+                        votes_to_add = event.votes_per_payment or 1
 
                 if not payment.contestant_id:
                     raise VotingException(
@@ -1385,7 +1433,7 @@ class PaymentService:
                     payment_id=payment.id,
                     contestant_id=payment.contestant_id,
                     votes_awarded=votes_to_add,
-                    competition_id=payment.competition_id,
+                    event_id=payment.event_id,
                 )
                 self.db.add(vote_txn)
 
@@ -1420,7 +1468,7 @@ class PaymentService:
                 logger.info(f"Transaction committed successfully. reference: {reference}.")
                 
                 # Invalidate cache after vote crediting
-                self._invalidate_vote_cache_async(payment.contestant_id, payment.competition_id)
+                self._invalidate_vote_cache(payment.contestant_id, payment.event_id)
             else:
                 payment.status = PaymentStatus.FAILED
 
@@ -1436,23 +1484,20 @@ class PaymentService:
             logger.error(f"Transaction rolled back during callback process: {str(e)}")
             raise
 
-    def _invalidate_vote_cache_async(self, contestant_id: str, competition_id: Optional[str] = None):
-        """Async cache invalidation helper for vote updates."""
-        import asyncio
+    def _invalidate_vote_cache(self, contestant_id: str, event_id: Optional[str] = None):
+        """Invalidate participant and leaderboard caches after vote updates."""
         from app.core.cache import get_cache_service
-        
-        async def _invalidate():
-            try:
-                cache_service = get_cache_service()
-                await cache_service.invalidate_participant(contestant_id)
-                await cache_service.invalidate_participants()  # Also invalidate public participants
-                if competition_id:
-                    await cache_service.invalidate_leaderboard(competition_id)
-            except Exception as e:
-                logger.error(f"Failed to invalidate cache for contestant {contestant_id}: {e}")
-        
-        # Fire and forget - don't block the main operation
-        asyncio.create_task(_invalidate())
+
+        try:
+            cache_service = get_cache_service()
+            cache_service.invalidate_participant(contestant_id)
+            cache_service.invalidate_participants()
+            cache_service.invalidate_leaderboard()
+            if event_id:
+                cache_service.invalidate_participants(event_id)
+                cache_service.invalidate_leaderboard(event_id)
+        except Exception as e:
+            logger.error(f"Failed to invalidate cache for contestant {contestant_id}: {e}")
 
     def check_payment_status(self, reference: str) -> PaymentStatusCheckResponse:
         """
@@ -1488,10 +1533,10 @@ class PaymentService:
                     # Directly apply the vote in this transaction (skip webhook signature)
                     try:
                         votes_to_add = 1
-                        if payment.competition_id:
-                            comp = self.comp_repo.get_by_id(payment.competition_id)
-                            if comp:
-                                votes_to_add = comp.votes_per_payment
+                        if payment.event_id:
+                            event = self.event_repo.get_by_id(payment.event_id)
+                            if event:
+                                votes_to_add = event.votes_per_payment
 
                         payment.status = PaymentStatus.PAID
 
@@ -1502,7 +1547,7 @@ class PaymentService:
                                 payment_id=payment.id,
                                 contestant_id=payment.contestant_id,
                                 votes_awarded=votes_to_add,
-                                competition_id=payment.competition_id,
+                                event_id=payment.event_id,
                             )
                             self.db.add(vote_txn)
 
@@ -1539,7 +1584,7 @@ class PaymentService:
             paid=False
         )
 
-    def update_voter_details(self, details_in: VoterDetailsUpdate) -> Dict[str, Any]:
+    def update_voter_details(self, details_in: VoterDetailsUpdate) -> SimpleMessageResponse:
         """
         POST-PAYMENT VOTER DETAILS COLLECTION:
         After a successful payment, the voter may provide name/email
@@ -1562,7 +1607,10 @@ class PaymentService:
             updated_fields.append(f"email={details_in.voter_email}")
 
         if not updated_fields:
-            return {"message": "No details to update.", "success": True}
+           return SimpleMessageResponse(
+                success=True,
+                message="No details to update."
+            ) 
 
         self.payment_repo.update()
 
@@ -1572,15 +1620,14 @@ class PaymentService:
             details=f"Updated voter details for payment {payment.reference}: {', '.join(updated_fields)}"
         )
 
-        return {
-            "success": True,
-            "message": "Voter details updated successfully."
-        }
+        return SimpleMessageResponse(
+            success=True,
+            message="Voter details updated successfully."
+        )
 
     def list_payments(self, offset: int = 0, limit: int = 100) -> Tuple[List[Dict[str, Any]], int]:
         """
-        Returns paginated payment records with contestant names attached.
-        PRIVACY: voter_phone and voter_email are NOT included in responses.
+        Returns paginated payment records with raw fields for admin table rendering.
         """
         payments, total = self.payment_repo.get_all_ordered_by_date(offset, limit)
 
@@ -1592,12 +1639,15 @@ class PaymentService:
             {
                 "id": p.id,
                 "reference": p.reference,
-                "contestant": name_by_id.get(p.contestant_id, "Unknown") if p.contestant_id else "Unknown",
-                "amount": f"${p.amount:.2f}",
+                "contestantId": p.contestant_id,
+                "contestantName": name_by_id.get(p.contestant_id, "Unknown") if p.contestant_id else "Unknown",
+                "amount": float(p.amount),
                 "paymentMethod": p.payment_method,
-                "status": p.status,
-                "date": p.date,
-                # NOTE: voter_phone and voter_email intentionally excluded
+                "status": p.status.value if hasattr(p.status, "value") else str(p.status),
+                "voterName": p.voter_name,
+                "voterEmail": p.voter_email,
+                "date": p.date.isoformat() if p.date else None,
+                "createdAt": p.created_at.isoformat() if p.created_at else None,
             }
             for p in payments
         ]

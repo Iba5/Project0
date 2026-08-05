@@ -1,6 +1,8 @@
 import { apiUrl, apiFetch, storeToken, clearToken } from './api-client'
 import type { AdminUser } from './store'
 import { useAppStore } from './store'
+import { setPlatformTimezone } from './date-utils'
+
 
 // ─── Auth ────────────────────────────────────────────────────────
 
@@ -45,7 +47,7 @@ export async function logout(): Promise<void> {
 export async function getMe(): Promise<{ user: AdminUser }> {
   console.log('[API] getMe called')
   try {
-    const result = await apiFetch('/auth/me')
+    const result = await apiFetch<{ user: AdminUser }>('/auth/me')
     console.log('[API] getMe result:', result)
     // Update the store with user data from backend
     if (typeof window !== 'undefined') {
@@ -101,6 +103,17 @@ export async function resetPassword(token: string, newPassword: string): Promise
   return apiFetch('/auth/reset-password', {
     method: 'POST',
     body: JSON.stringify({ token, newPassword }),
+  })
+}
+
+export async function verifyInvitation(token: string): Promise<{ valid: boolean; email: string; role: string }> {
+  return apiFetch(`/auth/invitation/${token}`)
+}
+
+export async function completeSignup(token: string, name: string, password: string): Promise<{ user: any; token: string; message: string }> {
+  return apiFetch('/auth/complete-signup', {
+    method: 'POST',
+    body: JSON.stringify({ token, name, password }),
   })
 }
 // ─── Dashboard ───────────────────────────────────────────────────
@@ -219,12 +232,19 @@ export interface EventItem {
   participantCount?: number
 }
 
+export interface PaginationInfo {
+  page: number
+  limit: number
+  total: number
+  totalPages: number
+}
+
 export interface ListEventsParams {
   search?: string
   status?: string
 }
 
-export async function listEvents(params?: ListEventsParams): Promise<{ items: EventItem[]; pagination: any }> {
+export async function listEvents(params?: ListEventsParams): Promise<{ items: EventItem[]; pagination: PaginationInfo }> {
   const searchParams = new URLSearchParams()
   if (params?.search) searchParams.set('search', params.search)
   if (params?.status) searchParams.set('status', params.status)
@@ -232,7 +252,7 @@ export async function listEvents(params?: ListEventsParams): Promise<{ items: Ev
   return apiFetch(`/events/admin${qs ? `?${qs}` : ''}`)
 }
 
-export async function listPublicEvents(): Promise<{ items: EventItem[]; pagination: any }> {
+export async function listPublicEvents(): Promise<{ items: EventItem[]; pagination: PaginationInfo }> {
   return apiFetch('/events')
 }
 
@@ -288,7 +308,7 @@ export interface ListParticipantsParams {
   category?: string
 }
 
-export async function listParticipants(params?: ListParticipantsParams): Promise<{ items: ParticipantItem[]; pagination: any }> {
+export async function listParticipants(params?: ListParticipantsParams): Promise<{ items: ParticipantItem[]; pagination: PaginationInfo }> {
   const searchParams = new URLSearchParams()
   if (params?.search) searchParams.set('search', params.search)
   if (params?.status) searchParams.set('status', params.status)
@@ -298,7 +318,7 @@ export async function listParticipants(params?: ListParticipantsParams): Promise
   return apiFetch(`/participants${qs ? `?${qs}` : ''}`)
 }
 
-export async function listPublicParticipants(params?: ListParticipantsParams): Promise<{ items: ParticipantItem[]; pagination: any }> {
+export async function listPublicParticipants(params?: ListParticipantsParams): Promise<{ items: ParticipantItem[]; pagination: PaginationInfo }> {
   const searchParams = new URLSearchParams()
   if (params?.search) searchParams.set('search', params.search)
   if (params?.eventId) searchParams.set('eventId', params.eventId)
@@ -325,7 +345,7 @@ export async function deleteParticipant(id: string): Promise<void> {
   return apiFetch(`/participants/${id}`, { method: 'DELETE' })
 }
 
-export type BulkParticipantAction = 'approve' | 'reject' | 'delete'
+export type BulkParticipantAction = 'approve' | 'reject' | 'disqualify' | 'delete'
 
 export async function bulkUpdateParticipants(
   ids: string[],
@@ -352,13 +372,19 @@ export interface PaymentItem {
   createdAt: string
 }
 
-export async function listPayments(params?: { status?: string; competitionId?: string }): Promise<{ payments: PaymentItem[] }> {
+export async function listPayments(params?: { status?: string; eventId?: string }): Promise<{ items: PaymentItem[]; payments: PaymentItem[]; pagination: PaginationInfo }> {
   const searchParams = new URLSearchParams()
   if (params?.status) searchParams.set('status', params.status)
-  if (params?.competitionId) searchParams.set('competitionId', params.competitionId)
+  if (params?.eventId) searchParams.set('eventId', params.eventId)
   const qs = searchParams.toString()
-  return apiFetch(`/payments${qs ? `?${qs}` : ''}`)
+  const res = await apiFetch<any>(`/payments${qs ? `?${qs}` : ''}`)
+  return {
+    items: res.items || res.payments || [],
+    payments: res.payments || res.items || [],
+    pagination: res.pagination || { total: (res.payments || res.items || []).length, page: 1, limit: 10, totalPages: 1 }
+  }
 }
+
 
 // ─── Settings ────────────────────────────────────────────────────
 
@@ -374,15 +400,24 @@ export interface SettingsItem {
 }
 
 export async function getSettings(): Promise<{ settings: SettingsItem }> {
-  return apiFetch('/settings')
+  const res = await apiFetch<{ settings: SettingsItem }>('/settings')
+  if (res?.settings?.timezone) {
+    setPlatformTimezone(res.settings.timezone)
+  }
+  return res
 }
 
 export async function updateSettings(payload: Record<string, unknown>): Promise<{ settings: SettingsItem }> {
-  return apiFetch('/settings', {
+  const res = await apiFetch<{ settings: SettingsItem }>('/settings', {
     method: 'PUT',
     body: JSON.stringify(payload),
   })
+  if (res?.settings?.timezone) {
+    setPlatformTimezone(res.settings.timezone)
+  }
+  return res
 }
+
 
 export async function getR2Usage(): Promise<unknown> {
   return apiFetch('/settings/r2-usage')
@@ -462,7 +497,7 @@ export interface PaymentMethod {
   isEnabled: boolean
   sortOrder: number
   iconName?: string
-  configData?: any
+  configData?: Record<string, unknown>
   createdAt: string
   updatedAt: string
 }
@@ -498,6 +533,11 @@ export async function getPublicStats(): Promise<PublicStats> {
   return apiFetch('/stats')
 }
 
+export function validatePhone(phone: string): boolean {
+  const cleaned = phone.replace(/[\s+]/g, '')
+  return /^\d{8,15}$/.test(cleaned)
+}
+
 export async function initiatePayment(data: {
   amount: number
   paymentMethod: string
@@ -505,9 +545,11 @@ export async function initiatePayment(data: {
   voterPhone?: string
   voterName?: string
   voterEmail?: string
-  competitionId?: string
   idempotencyKey: string
 }): Promise<{ payment: PaymentItem & { pollUrl: string | null; paynowRedirectUrl: string | null }; idempotent: boolean }> {
+  if (data.voterPhone && !validatePhone(data.voterPhone)) {
+    throw new Error('Invalid phone number format. Must be between 8 and 15 digits.')
+  }
   return apiFetch('/payments', {
     method: 'POST',
     body: JSON.stringify(data),
@@ -617,7 +659,7 @@ export interface Achievement {
   title: string
   name?: string
   description: string
-  requirement?: string
+  requirement?: number | string
   icon: string
   tier: 'bronze' | 'silver' | 'gold' | 'platinum' | 'diamond'
   category: 'voting' | 'milestone' | 'social' | 'special'

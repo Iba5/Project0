@@ -110,6 +110,28 @@ class CacheService:
         except Exception as e:
             logger.error(f"Cache events invalidate error: {str(e)}")
         return 0
+
+    def invalidate_participant(self, participant_id: str) -> int:
+        """Invalidate cache keys for a single participant."""
+        return self.invalidate_pattern(
+            f"{CACHE_KEYS['participant_details']}:{participant_id}*"
+        )
+
+    def invalidate_participants(self, event_id: Optional[str] = None) -> int:
+        """Invalidate participant list cache keys."""
+        if event_id:
+            return self.invalidate_pattern(
+                f"{CACHE_PREFIXES['participants']}:event:{event_id}*"
+            )
+        return self.invalidate_pattern(f"{CACHE_PREFIXES['participants']}:*")
+
+    def invalidate_leaderboard(self, event_id: Optional[str] = None) -> int:
+        """Invalidate leaderboard cache keys."""
+        if event_id:
+            return self.invalidate_pattern(
+                f"{CACHE_PREFIXES['leaderboard']}:event:{event_id}*"
+            )
+        return self.invalidate_pattern(f"{CACHE_PREFIXES['leaderboard']}:*")
     
     def clear_all(self) -> bool:
         """Clear all cache keys."""

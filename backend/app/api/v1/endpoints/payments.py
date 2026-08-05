@@ -1,6 +1,6 @@
 import logging
-from datetime import datetime
-from typing import List, Optional
+from datetime import datetime, timezone
+from typing import Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Form, Query, Request, status as http_status
 from sqlalchemy.orm import Session
 
@@ -11,8 +11,11 @@ from app.api.v1.dependencies import PermissionChecker, PaginationParams, get_cur
 from app.enums.enums import Permission
 from app.services.services import PaymentService, DashboardService
 from app.schemas.schemas import (
-    PaymentCreate, PaymentResponse, 
-    VoterCheckResponse, VoterDetailsUpdate, PaymentStatusCheckResponse
+    PaymentCreate, PaymentEnvelopeResponse, PaymentInitiationResponse, PaymentResponse, PaymentSummaryResponse,
+    VoterCheckResponse, VoterDetailsUpdate, PaymentStatusCheckResponse,
+    CallbackAckResponse, PaymentListResponse,
+    TestPaymentCompleteResponse, TestPaymentItemResponse,
+    TestPaymentListResponse, TestPaymentCleanupResponse,
 )
 from app.repositories.repositories import paginate_response
 from app.models.models import User, TestPayment
@@ -22,23 +25,47 @@ router = APIRouter()
 allow_read_payments = Depends(PermissionChecker(Permission.PAYMENTS_READ))
 
 
+def format_payment_initiation_response(
+    result: PaymentInitiationResponse,
+    ) -> PaymentEnvelopeResponse:
+        return PaymentEnvelopeResponse(
+            payment=PaymentSummaryResponse(
+                id=result.id or result.reference,
+                reference=result.reference,
+                contestant_id=result.contestant_id,
+                amount=result.amount,
+                payment_method=result.payment_method,
+                status=result.status,
+                voter_name=result.voter_name,
+                voter_email=result.voter_email,
+                date=result.date,
+                created_at=result.created_at,
+                poll_url=result.poll_url,
+                paynowRedirectUrl=result.redirect_url,
+                instructions=result.instructions,
+                test_mode=result.test_mode,
+            ),
+        idempotent=result.idempotent,
+    )
+
+
 @router.get(
     "/check-voter",
     response_model=VoterCheckResponse,
     summary="Check if voter phone has already voted",
     description="Pre-payment check: returns a warning if the phone number has already "
-                "successfully voted in the current competition. Frontend should show this "
+                "successfully voted in the current event. Frontend should show this "
                 "warning and require acknowledgement before proceeding.",
 )
 def check_voter(
     phone: str = Query(..., description="Voter phone number to check"),
-    competition_id: Optional[str] = Query(None, description="Optional competition ID (defaults to active)"),
+    event_id: Optional[str] = Query(None, description="Optional event ID (defaults to active)"),
     db: Session = Depends(get_db)
 ):
     # Normalize phone to match what the PaymentCreate validator does
     cleaned_phone = phone.strip().replace(" ", "").replace("+", "")
     payment_service = PaymentService(db)
-    return payment_service.check_voter_duplicate(cleaned_phone, competition_id)
+    return payment_service.check_voter_duplicate(cleaned_phone, event_id)
 
 
 @router.post(
@@ -56,9 +83,10 @@ def check_voter(
         "Registers a pending vote purchase and calls the Paynow SDK to generate a checkout. "
         "Requires voter_phone. Checks for duplicate voters and rate-limits by phone. "
         "Saves poll_url for dual verification. Returns redirect URL or mobile instructions. "
-        "The amount is determined SERVER-SIDE from the competition/event vote_price — "
+        "The amount is determined SERVER-SIDE from the event vote_price — "
         "any client-supplied amount is IGNORED to prevent price manipulation."
     ),
+    response_model=PaymentEnvelopeResponse
 )
 def initiate_payment(payment_in: PaymentCreate, request: Request, db: Session = Depends(get_db)):
     payment_service = PaymentService(db)
@@ -67,14 +95,13 @@ def initiate_payment(payment_in: PaymentCreate, request: Request, db: Session = 
     result = payment_service.initiate_payment(payment_in, idempotency_key=idempotency_key)
     
     # If duplicate warning, return 409 to signal frontend to show warning
-    if result.get("has_voted") and result.get("warning"):
+    if result.has_voted and result.warning:
         from fastapi.responses import JSONResponse
         return JSONResponse(
             status_code=http_status.HTTP_409_CONFLICT,
-            content=result
+            content=result.model_dump(by_alias=True),
         )
-    
-    return result
+    return format_payment_initiation_response(result)
 
 
 @router.get(
@@ -109,6 +136,7 @@ def update_voter_details(
 
 @router.post(
     "/paynow/callback",
+    response_model=CallbackAckResponse,
     summary="Paynow Webhook Callback",
     description=(
         "Public webhook for Paynow Zimbabwe to post transaction results. "
@@ -153,11 +181,12 @@ async def paynow_callback(
         )
     
     payment_service.process_paynow_callback(callback_data)
-    return {"status": "ok"}
+    return CallbackAckResponse(status="ok")
 
 
 @router.get(
     "/",
+    response_model=PaymentListResponse,
     summary="List all payment records (paginated)",
     description="Returns paginated payment history. Voter phone numbers and emails are NOT exposed.",
     dependencies=[allow_read_payments]
@@ -165,8 +194,11 @@ async def paynow_callback(
 def list_payments(pagination: PaginationParams = Depends(), db: Session = Depends(get_db)):
     payment_service = PaymentService(db)
     items, total = payment_service.list_payments(pagination.offset, pagination.limit)
-    # Return format matching frontend expectation
-    return {"payments": items, "total": total}
+    res = paginate_response(items, total, pagination.page, pagination.page_size)
+    # Add payments key for backward compatibility with the frontend
+    res["payments"] = res["items"]
+    return res
+
 
 
 # =============================================================================
@@ -175,6 +207,7 @@ def list_payments(pagination: PaginationParams = Depends(), db: Session = Depend
 
 @router.post(
     "/test/{reference}/complete",
+    response_model=TestPaymentCompleteResponse,
     summary="Complete a test payment (development only)",
     description="Simulates payment completion for test payments. Only works when TEST_PAYMENT_MODE=true."
 )
@@ -232,7 +265,7 @@ def complete_test_payment(
         status=PaymentStatus.PAID,
         voter_phone=test_payment.voter_phone,
         voter_email=test_payment.voter_email,
-        competition_id=test_payment.competition_id,
+        event_id=test_payment.event_id,
         poll_url="test_mode",
         paynow_redirect_url=test_payment.test_redirect_url
     )
@@ -244,7 +277,7 @@ def complete_test_payment(
         payment_id=real_payment.id,
         contestant_id=test_payment.contestant_id,
         votes_awarded=1,  # Default 1 vote per payment
-        competition_id=test_payment.competition_id
+        event_id=test_payment.event_id
     )
     db.add(vote_transaction)
     
@@ -253,7 +286,7 @@ def complete_test_payment(
     
     # Update test payment status
     test_payment.status = "completed"
-    test_payment.updated_at = datetime.now()
+    test_payment.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     
@@ -266,18 +299,19 @@ def complete_test_payment(
     
     logger.info(f"Test payment {reference} completed successfully for contestant {contestant.name}")
     
-    return {
-        "status": "completed",
-        "reference": reference,
-        "contestant_name": contestant.name,
-        "amount": str(test_payment.amount),
-        "votes_awarded": 1,
-        "test_mode": True
-    }
+    return TestPaymentCompleteResponse(
+        status="completed",
+        reference=reference,
+        contestant_name=contestant.name,
+        amount=str(test_payment.amount),
+        votes_awarded=1,
+        test_mode=True,
+    )
 
 
 @router.get(
     "/test/list",
+    response_model=TestPaymentListResponse,
     summary="List all test payments (development only)",
     description="Returns all test payments for monitoring. Only works when TEST_PAYMENT_MODE=true.",
     dependencies=[allow_read_payments]
@@ -300,32 +334,31 @@ def list_test_payments(
     
     test_payment_repo = TestPaymentRepository(db)
     test_payments = test_payment_repo.get_all_test_payments()
-    
-    return {
-        "test_payments": [
-            {
-                "reference": tp.reference,
-                "contestant_id": tp.contestant_id,
-                "amount": str(tp.amount),
-                "payment_method": tp.payment_method,
-                "status": tp.status,
-                "voter_phone": tp.voter_phone,
-                "voter_email": tp.voter_email,
-                "competition_id": tp.competition_id,
-                "test_redirect_url": tp.test_redirect_url,
-                "created_at": tp.created_at.isoformat() if tp.created_at else None,
-                "updated_at": tp.updated_at.isoformat() if tp.updated_at else None,
-                "auto_complete": tp.auto_complete,
-                "test_completion_delay": tp.test_completion_delay
-            }
-            for tp in test_payments
-        ],
-        "total": len(test_payments)
-    }
+
+    items = [
+        TestPaymentItemResponse(
+            reference=tp.reference,
+            contestant_id=tp.contestant_id,
+            amount=str(tp.amount),
+            payment_method=tp.payment_method,
+            status=tp.status,
+            voter_phone=tp.voter_phone,
+            voter_email=tp.voter_email,
+            event_id=tp.event_id,
+            test_redirect_url=tp.test_redirect_url,
+            created_at=tp.created_at,
+            updated_at=tp.updated_at,
+            auto_complete=tp.auto_complete,
+            test_completion_delay=tp.test_completion_delay,
+        )
+        for tp in test_payments
+    ]
+    return TestPaymentListResponse(test_payments=items, total=len(items))
 
 
 @router.delete(
     "/test/cleanup",
+    response_model=TestPaymentCleanupResponse,
     summary="Delete all test payments (development only)",
     description="Deletes all test payments from the database. Only works when TEST_PAYMENT_MODE=true.",
     dependencies=[allow_read_payments]
@@ -364,8 +397,8 @@ def cleanup_test_payments(
     
     logger.info(f"Cleaned up {deleted_count} test payments")
     
-    return {
-        "status": "completed",
-        "deleted_count": deleted_count,
-        "message": f"Successfully deleted {deleted_count} test payments"
-    }
+    return TestPaymentCleanupResponse(
+        status="completed",
+        deleted_count=deleted_count,
+        message=f"Successfully deleted {deleted_count} test payments",
+    )

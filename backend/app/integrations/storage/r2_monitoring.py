@@ -1,6 +1,6 @@
 import logging
 from typing import Dict, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -96,7 +96,7 @@ class R2UsageMonitor:
                 'largest_files': largest_files,
                 'free_tier_storage_mb': 10240,  # 10GB free tier
                 'free_tier_usage_percent': round((total_size / (1024 * 1024 * 1024 * 10)) * 100, 2),
-                'last_updated': datetime.utcnow().isoformat()
+                'last_updated': datetime.now(timezone.utc).isoformat()
             }
             
         except Exception as e:
@@ -111,7 +111,7 @@ class R2UsageMonitor:
                 'largest_files': [],
                 'free_tier_storage_mb': 10240,
                 'free_tier_usage_percent': 0,
-                'last_updated': datetime.utcnow().isoformat()
+                'last_updated': datetime.now(timezone.utc).isoformat()
             }
     
     def get_recent_uploads(self, days: int = 7) -> Dict:
@@ -127,7 +127,7 @@ class R2UsageMonitor:
         try:
             s3_client = self._get_s3_client()
             
-            cutoff_date = datetime.utcnow() - timedelta(days=days)
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
             
             paginator = s3_client.get_paginator('list_objects_v2')
             
@@ -152,7 +152,7 @@ class R2UsageMonitor:
                 'total_uploads': len(recent_uploads),
                 'daily_uploads': daily_uploads,
                 'recent_files': recent_uploads[:20],  # Last 20 uploads
-                'last_updated': datetime.utcnow().isoformat()
+                'last_updated': datetime.now(timezone.utc).isoformat()
             }
             
         except Exception as e:
@@ -163,7 +163,7 @@ class R2UsageMonitor:
                 'total_uploads': 0,
                 'daily_uploads': {},
                 'recent_files': [],
-                'last_updated': datetime.utcnow().isoformat()
+                'last_updated': datetime.now(timezone.utc).isoformat()
             }
     
     def get_comprehensive_usage(self) -> Dict:
@@ -187,7 +187,7 @@ class R2UsageMonitor:
                 'free_tier_usage_percent': storage_usage.get('free_tier_usage_percent', 0),
                 'is_near_limit': storage_usage.get('free_tier_usage_percent', 0) > 80
             },
-            'last_updated': datetime.utcnow().isoformat()
+            'last_updated': datetime.now(timezone.utc).isoformat()
         }
 
 

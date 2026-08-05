@@ -406,7 +406,6 @@ export default function LeaderboardView() {
             description="The leaderboard will populate once voting begins. Be the first to cast your vote!"
             actionLabel="Browse Contestants"
             onAction={() => {
-              setSelectedParticipantId(null)
               router.push('/contestants')
             }}
           />

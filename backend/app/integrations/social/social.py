@@ -1,6 +1,5 @@
 import logging
 from typing import Dict, Any
-from app.enums.enums import SocialPlatform
 
 logger = logging.getLogger(__name__)
 
@@ -19,13 +18,14 @@ class SocialSyncClient:
     Until implemented, callers should NOT depend on this class returning real data.
     """
     @staticmethod
-    def fetch_video_metadata(platform: SocialPlatform, video_url: str) -> Dict[str, Any]:
+    def fetch_video_metadata(platform: str, video_url: str) -> Dict[str, Any]:
         """
         NOT YET IMPLEMENTED.
         Raises NotImplementedError to prevent silent incorrect data usage.
         """
+        platform_name = platform.value if hasattr(platform, "value") else str(platform)
         raise NotImplementedError(
-            f"Social media sync for {platform.value} is not yet implemented. "
+            f"Social media sync for {platform_name} is not yet implemented. "
             "Remove calls to SocialSyncClient.fetch_video_metadata or implement "
             "the real platform API integration."
         )

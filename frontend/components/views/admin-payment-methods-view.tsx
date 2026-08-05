@@ -116,7 +116,16 @@ export default function AdminPaymentMethodsView() {
     setValue,
     formState: { errors, isSubmitting },
   } = useForm<PaymentMethodFormValues>({
-    resolver: zodResolver(paymentMethodSchema),
+    resolver: zodResolver(paymentMethodSchema) as any,
+    defaultValues: {
+      method: '',
+      methodType: 'web',
+      displayName: '',
+      description: '',
+      isEnabled: true,
+      sortOrder: 0,
+      iconName: '',
+    },
   })
 
   const fetchPaymentMethods = async () => {

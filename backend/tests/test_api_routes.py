@@ -3,10 +3,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 
-client = TestClient(app)
-
-
-def test_api_routes_accept_paths_with_trailing_slashes():
+def test_api_routes_accept_paths_with_trailing_slashes(client):
     """Verify that collection endpoints accept requests with trailing slashes."""
     for path in [
         "/api/v1/events/",

@@ -11,19 +11,26 @@ class EventRulesEngine:
     allowed platform list verification, opening/closing dates).
     """
     @staticmethod
+    def _ensure_timezone(dt: datetime | None) -> datetime | None:
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt
+    @staticmethod
     def validate_voting_allowed(event: Event) -> None:
         """
         Verifies that voting has opened, hasn't closed, and is in an Ongoing/Voting Open phase.
         """
         now = datetime.now(timezone.utc)
-        
-        # Check date boundaries if set
-        if event.voting_opens and now < event.voting_opens.replace(tzinfo=timezone.utc):
-            raise VotingException("Voting has not yet opened for this event.")
-            
-        if event.voting_closes and now > event.voting_closes.replace(tzinfo=timezone.utc):
-            raise VotingException("Voting has closed for this event.")
+        voting_opens = EventRulesEngine._ensure_timezone(event.voting_opens)
+        voting_closes = EventRulesEngine._ensure_timezone(event.voting_closes)
 
+        if voting_opens and now < voting_opens:
+            raise VotingException("Voting has not yet opened for this event.")
+
+        if voting_closes and now > voting_closes:
+            raise VotingException("Voting has closed for this event.")
     @staticmethod
     def validate_registration_allowed(event: Event) -> None:
         """
@@ -31,10 +38,13 @@ class EventRulesEngine:
         """
         now = datetime.now(timezone.utc)
         
-        if event.registration_opens and now < event.registration_opens.replace(tzinfo=timezone.utc):
+        registration_opens = EventRulesEngine._ensure_timezone(event.registration_opens)
+        registration_closes = EventRulesEngine._ensure_timezone(event.registration_closes)
+
+        if registration_opens and now < registration_opens:
             raise VotingException("Registration has not yet opened.")
-            
-        if event.registration_closes and now > event.registration_closes.replace(tzinfo=timezone.utc):
+
+        if registration_closes and now > registration_closes:
             raise VotingException("Registration has closed.")
 
     @staticmethod

@@ -20,6 +20,7 @@ import {
   DollarSign,
   ChevronRight,
   Check,
+  Ticket,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -347,20 +348,12 @@ export default function PaymentView({ participantId }: { participantId: string }
         setParticipantName(data.participant.name)
         setParticipantCategory(data.participant.category)
         
-        // Try to get vote price from participant's event/competition
-        if (data.participant.eventId || data.participant.competitionId) {
+        // Load vote price from participant's event
+        if (data.participant.eventId) {
           try {
-            // Fetch event or competition to get vote price
-            if (data.participant.eventId) {
-              const eventResponse = await apiFetch(`/events/${data.participant.eventId}`)
-              if (eventResponse.event?.votePrice) {
-                setVotePrice(eventResponse.event.votePrice)
-              }
-            } else if (data.participant.competitionId) {
-              const compResponse = await apiFetch(`/competitions/${data.participant.competitionId}`)
-              if (compResponse.competition?.votePrice) {
-                setVotePrice(compResponse.competition.votePrice)
-              }
+            const eventResponse = await apiFetch(`/events/${data.participant.eventId}`) as { event?: { votePrice?: number } }
+            if (eventResponse.event?.votePrice) {
+              setVotePrice(eventResponse.event.votePrice)
             }
           } catch (error) {
             console.error('Failed to fetch vote price, using default', error)
@@ -429,6 +422,11 @@ export default function PaymentView({ participantId }: { participantId: string }
       setPhoneError('Phone number is required for mobile money')
       return false
     }
+    const cleaned = phone.replace(/[\s+]/g, '')
+    if (!/^\d{8,15}$/.test(cleaned)) {
+      setPhoneError('Invalid phone number format. Must be between 8 and 15 digits.')
+      return false
+    }
     setPhoneError(null)
     return true
   }, [])
@@ -481,8 +479,6 @@ export default function PaymentView({ participantId }: { participantId: string }
         voterPhone: phone || undefined,
         voterName: voterName || undefined,
         voterEmail: voterEmail || undefined,
-        sourcePlatform: 'Web',
-        competitionId: undefined,
         idempotencyKey: idempotencyKey,
       })
 
@@ -772,7 +768,7 @@ export default function PaymentView({ participantId }: { participantId: string }
                         ${amount}
                       </div>
                       <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                        {calculateVotes(amount)} vote{calculateVotes(amount) !== 1 ? 's' : ''}
+                        {calculateVotes(amount, votePrice)} vote{calculateVotes(amount, votePrice) !== 1 ? 's' : ''}
                       </div>
                     </motion.button>
                   ))}
@@ -1036,7 +1032,7 @@ export default function PaymentView({ participantId }: { participantId: string }
                     <div className="flex justify-between text-sm">
                       <span style={{ color: 'var(--text-muted)' }}>Payment Method</span>
                       <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
-                        {selectedMethod?.name || '—'}
+                        {selectedMethod?.displayName || '—'}
                       </span>
                     </div>
                     <div
@@ -1092,7 +1088,7 @@ export default function PaymentView({ participantId }: { participantId: string }
                     />
                   </div>
 
-                  {selectedMethod?.type === 'mobile_money' && (
+                  {selectedMethod?.methodType === 'mobile_money' && (
                     <motion.div
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: 'auto' }}
@@ -1122,7 +1118,7 @@ export default function PaymentView({ participantId }: { participantId: string }
                         <p className="text-xs text-red-400 mt-1">{phoneError}</p>
                       )}
                       <p className="text-xs text-muted-foreground/60 mt-1">
-                        Enter the phone number linked to your {selectedMethod.name} account
+                        Enter the phone number linked to your {selectedMethod.displayName} account
                       </p>
                     </motion.div>
                   )}

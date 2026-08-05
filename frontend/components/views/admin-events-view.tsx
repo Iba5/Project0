@@ -25,7 +25,8 @@ import { listEvents, createEvent, updateEvent, deleteEvent, publishEvent, type E
 import { uploadImage } from '@/lib/upload-api'
 import { apiUrl } from '@/lib/api-client'
 import { nameToSolidGradient } from '@/lib/utils'
-import { formatDateTime, formatForInput } from '@/lib/date-utils'
+import { formatDateTime, formatForInput, parseLocalInputToUTC } from '@/lib/date-utils'
+
 import { useAppStore } from '@/lib/store'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
@@ -450,14 +451,15 @@ export function AdminEventsView() {
       const payload: Record<string, unknown> = {
         ...values,
         banner: values.banner || null,
-        startDate: values.startDate,
-        endDate: values.endDate,
-        registrationOpens: values.registrationOpens || null,
-        registrationCloses: values.registrationCloses || null,
-        votingOpens: values.votingOpens || null,
-        votingCloses: values.votingCloses || null,
+        startDate: parseLocalInputToUTC(values.startDate),
+        endDate: parseLocalInputToUTC(values.endDate),
+        registrationOpens: parseLocalInputToUTC(values.registrationOpens),
+        registrationCloses: parseLocalInputToUTC(values.registrationCloses),
+        votingOpens: parseLocalInputToUTC(values.votingOpens),
+        votingCloses: parseLocalInputToUTC(values.votingCloses),
         description: values.description || null,
       }
+
 
       if (editingEvent) {
         await updateEvent(editingEvent.id, payload)

@@ -40,18 +40,54 @@ class FraudDetectionService:
                 f"per transaction ({MAX_VOTES_PER_TRANSACTION})."
             )
 
-    def verify_request_replay(self, request_id: str) -> None:
+    async def verify_request_replay(self, request_id: str) -> None:
         """
-        M10 FIX: Previously a no-op placeholder. Now raises NotImplementedError
-        to prevent false sense of security.
-        
-        To implement: use Redis SET NX with TTL to store seen request IDs.
-        Example:
-            if redis.set(f"replay:{request_id}", "1", nx=True, ex=300):
-                return  # First time seeing this request
-            raise FraudException("Replay detected: this request ID has already been processed.")
+        Verify request replay protection using Redis with a thread-safe in-memory fallback.
+        nx=True ensures SET only succeeds if the key does not already exist.
+        ex=300 sets a 5-minute TTL.
         """
-        raise NotImplementedError(
-            "Replay detection is not yet implemented. "
-            "Implement with Redis SET NX before enabling in production."
-        )
+        if not request_id:
+            return
+
+        from app.core.redis import redis_client
+
+        if redis_client is not None:
+            try:
+                # Set key with TTL of 300 seconds (5 minutes)
+                # nx=True ensures it is only set if it does not already exist
+                is_new = await redis_client.set(f"replay:{request_id}", "1", nx=True, ex=300)
+                if not is_new:
+                    logger.warning(f"Fraud Alert | Replay detected for request ID: {request_id}")
+                    raise FraudException(f"Replay detected: this request ID has already been processed.")
+            except Exception as e:
+                if isinstance(e, FraudException):
+                    raise
+                logger.warning(f"Redis error during replay check: {e}. Falling back to in-memory replay check.")
+                self._verify_in_memory_replay(request_id)
+        else:
+            self._verify_in_memory_replay(request_id)
+
+    def _verify_in_memory_replay(self, request_id: str) -> None:
+        """Fallback thread-safe in-memory replay check."""
+        import time
+        import threading
+
+        # Initialize global class-level or module-level tracking if not already present
+        if not hasattr(self.__class__, "_in_memory_replays"):
+            self.__class__._in_memory_replays = {}
+            self.__class__._replays_lock = threading.Lock()
+
+        now = time.time()
+        with self.__class__._replays_lock:
+            # Cleanup expired entries (older than 300 seconds)
+            expired = [k for k, ts in self.__class__._in_memory_replays.items() if now - ts > 300]
+            for k in expired:
+                del self.__class__._in_memory_replays[k]
+
+            # Check for replay
+            if request_id in self.__class__._in_memory_replays:
+                logger.warning(f"Fraud Alert | Replay detected (in-memory) for request ID: {request_id}")
+                raise FraudException(f"Replay detected: this request ID has already been processed.")
+
+            # Record request ID
+            self.__class__._in_memory_replays[request_id] = now

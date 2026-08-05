@@ -32,7 +32,6 @@ paynow==1.0.8
 pluggy==1.6.0
 psycopg==3.3.4
 psycopg-binary==3.3.4
-psycopg2-binary==2.9.12
 pyasn1==0.6.4
 pycparser==3.0
 pydantic==2.13.4

@@ -32,6 +32,9 @@ redis_client: Redis | None = None
 async def init_redis() -> Redis | None:
     global redis_client
 
+    if not settings.REDIS_URL:
+        return None
+
     if redis_client is None:
         try:
             redis_client = Redis.from_url( # pyright: ignore[reportUnknownMemberType]
@@ -42,6 +45,7 @@ async def init_redis() -> Redis | None:
                     retry_on_timeout=True,
                     health_check_interval=30,
                 )
+
 
             await redis_client.ping()# pyright: ignore[reportUnknownMemberType]
 

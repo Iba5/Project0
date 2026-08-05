@@ -72,9 +72,8 @@ export function QuickVoteDialog({
     try {
       const result = await initiatePayment({
         amount: Number(total),
-        paymentMethod: method.name,
+        paymentMethod: method.method,
         contestantId: participant.id,
-        sourcePlatform: 'Web',
         idempotencyKey: idempotencyKey,
       })
       setSuccess(true)
@@ -206,8 +205,8 @@ export function QuickVoteDialog({
                         style={{ color: 'var(--text-primary)' }}
                       >
                         <div className="flex items-center gap-2">
-                          <span className="text-base">{m.icon}</span>
-                          <span className="font-medium truncate">{m.name}</span>
+                          <span className="text-base">{m.iconName || '💳'}</span>
+                          <span className="font-medium truncate">{m.displayName}</span>
                         </div>
                       </button>
                     )

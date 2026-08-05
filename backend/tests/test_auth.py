@@ -15,7 +15,7 @@ def test_admin_registration(client):
     data = response.json()
     assert "token" in data
     assert data["user"]["email"] == "superadmin@votingcorp.com"
-    assert data["user"]["role"] in ("Admin", "Super Admin")
+    assert data["user"]["role"] in ("super_admin", "admin")
 
 def test_admin_login(client):
     """
@@ -42,3 +42,4 @@ def test_admin_login(client):
     data = response.json()
     assert "token" in data
     assert data["user"]["email"] == "tester@votingcorp.com"
+

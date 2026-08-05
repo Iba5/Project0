@@ -41,6 +41,16 @@ def list_admins(current_user: User = allow_authenticated, db: Session = Depends(
 
 
 @router.get(
+    "/",
+    summary="List All Admins (trailing-slash alias)",
+    description="Get list of all admin users. Requires authentication.",
+    include_in_schema=False
+)
+def list_admins_slash(current_user: User = allow_authenticated, db: Session = Depends(get_db)):
+    return fetch_and_format_admins(db)
+
+
+@router.get(
     "/list",
     summary="List All Admins (alias)",
     description="Get list of all admin users. Requires authentication."

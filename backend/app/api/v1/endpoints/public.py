@@ -50,6 +50,7 @@ def get_public_event(event_id: str, db: Session = Depends(get_db)):
 
 @router.get(
     "/events/{event_id}/participants",
+    response_model=dict[str, list[ParticipantResponse]],
     summary="List public participants for an event",
     description="Get all approved participants for a published event"
 )

@@ -101,8 +101,8 @@ function normalizeStatus(status: string): 'paid' | 'pending' | 'failed' | 'other
 function getMethodEmoji(method: string): string | null {
   if (!method) return null
   const lowered = method.toLowerCase()
-  const match = paymentMethods.find((m) => m.id.toLowerCase() === lowered || m.name.toLowerCase() === lowered)
-  return match?.icon ?? null
+  const match = paymentMethods.find((m) => m.id.toLowerCase() === lowered || m.method.toLowerCase() === lowered || m.displayName.toLowerCase() === lowered)
+  return match?.iconName ?? null
 }
 
 function getContestantName(p: PaymentWithParticipant): string {

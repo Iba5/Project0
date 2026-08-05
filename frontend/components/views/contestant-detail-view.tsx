@@ -457,7 +457,8 @@ export default function ContestantDetailView({ participantId }: { participantId:
     getPublicParticipants(1, 100)
       .then((res) => {
         if (cancelled || !participant) return
-        const filtered = res.participants
+        const items = res.items || (res as any).participants || []
+        const filtered = items
           .filter(
             (p) =>
               p.id !== participant.id &&
@@ -659,7 +660,7 @@ export default function ContestantDetailView({ participantId }: { participantId:
                 {participant.name}
               </h1>
               <a
-                href={participant.videoUrl}
+                href={participant.videoUrl ?? undefined}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-block"
@@ -730,7 +731,7 @@ export default function ContestantDetailView({ participantId }: { participantId:
 
                 {/* Play button */}
                 <a
-                  href={participant.videoUrl}
+                  href={participant.videoUrl ?? undefined}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="relative z-10"

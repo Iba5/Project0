@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.core import config
 
 
@@ -25,7 +25,7 @@ def test_e2e_admin_event_upload_participant(client):
     auth_headers = {"Authorization": f"Bearer {token}"}
 
     # 2) Create an event
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     event_payload = {
         "name": "E2E Test Event",
         "description": "Integration test event",
@@ -37,27 +37,31 @@ def test_e2e_admin_event_upload_participant(client):
 
     resp = client.post("/api/v1/events/", json=event_payload, headers=auth_headers)
     assert resp.status_code == 201, resp.text
-    event = resp.json()
+    body = resp.json()
+    event = body.get("event", body)
     assert event["name"] == "E2E Test Event"
 
-    # 3) Upload an image
+    # 3) Upload an image with auth headers
     files = {"image": ("test.jpg", b"dummydata", "image/jpeg")}
-    resp = client.post("/api/v1/upload", files=files)
+    resp = client.post("/api/v1/upload", files=files, headers=auth_headers)
     assert resp.status_code == 200, resp.text
     up = resp.json()
     assert up.get("url") and up.get("fileName")
     video_url = up["url"]
 
-    # 4) Create a participant using uploaded URL
+    # 4) Create a participant using uploaded URL and eventId
     participant_payload = {
         "name": "Contestant One",
         "category": "Singing",
         "platform": "TikTok",
         "videoUrl": video_url,
+        "eventId": event["id"],
     }
 
     resp = client.post("/api/v1/participants/", json=participant_payload, headers=auth_headers)
     assert resp.status_code == 201, resp.text
-    p = resp.json()
+    body = resp.json()
+    p = body.get("participant", body)
     assert p["name"] == "Contestant One"
     assert p["videoUrl"] == video_url
+
