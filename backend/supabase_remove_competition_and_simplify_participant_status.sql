@@ -29,6 +29,18 @@ ALTER TABLE participants DROP COLUMN IF EXISTS competition_id;
 -- Drop competition_id from payments table (if exists)  
 ALTER TABLE payments DROP COLUMN IF EXISTS competition_id;
 
+-- Drop competition_id from vote_transactions table (if exists)
+ALTER TABLE vote_transactions DROP COLUMN IF EXISTS competition_id;
+
+-- Add event_id to vote_transactions table (if not exists)
+ALTER TABLE vote_transactions ADD COLUMN IF NOT EXISTS event_id VARCHAR REFERENCES events(id) ON DELETE SET NULL;
+
+-- Drop competition_id from test_payments table (if exists)
+ALTER TABLE test_payments DROP COLUMN IF EXISTS competition_id;
+
+-- Add event_id to test_payments table (if not exists)
+ALTER TABLE test_payments ADD COLUMN IF NOT EXISTS event_id VARCHAR REFERENCES events(id) ON DELETE SET NULL;
+
 -- ============================================================================
 -- STEP 3: Drop competitions table
 -- ============================================================================

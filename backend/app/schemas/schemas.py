@@ -125,7 +125,7 @@ class EventBase(CamelModel):
     share_link: Optional[str] = None  # Internal shareable link
 
 class EventCreate(EventBase):
-    competition_id: Optional[str] = None
+    pass
 
 # L9 FIX: Update schemas use Optional fields so PUT can be partial
 class EventUpdate(CamelModel):
@@ -146,11 +146,9 @@ class EventUpdate(CamelModel):
     require_contestant_approval: Optional[bool] = None
     enable_videos: Optional[bool] = None
     share_link: Optional[str] = None
-    competition_id: Optional[str] = None
 
 class EventResponse(EventBase):
     id: str
-    competition_id: Optional[str] = None
     computed_status: Optional[str] = None  # Computed runtime status
 
 # --- Participant / Contestant Schemas ---

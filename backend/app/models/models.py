@@ -170,8 +170,8 @@ class VoteTransaction(Base):
     votes_awarded: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    # Competition scoping
-    competition_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("competitions.id"), nullable=True, index=True)
+    # Event scoping
+    event_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("events.id"), nullable=True, index=True)
 
     payment: Mapped["Payment"] = relationship("Payment", back_populates="vote_transaction")
     contestant: Mapped["Participant"] = relationship("Participant", back_populates="vote_transactions")
@@ -256,7 +256,7 @@ class TestPayment(Base):
     status: Mapped[str] = mapped_column(String, default="created", nullable=False)
     voter_phone: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     voter_email: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    competition_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    event_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     test_redirect_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     is_test_payment: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

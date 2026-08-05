@@ -543,101 +543,11 @@ class DashboardService:
 
 
 # ---------------------------------------------------------------------------
-# CompetitionService
+# CompetitionService (DEPRECATED - Replaced by EventService)
 # ---------------------------------------------------------------------------
 
-class CompetitionService:
-    """
-    CRUD management for Competitions.
-    Only one competition can be active at a time.
-    """
-    def __init__(self, db: Session, user_id: Optional[str] = None) -> None:
-        self.db = db
-        self.user_id = user_id
-        self.comp_repo = CompetitionRepository(db)
-
-    def list_competitions(self, offset: int = 0, limit: int = 100) -> Tuple[List[Competition], int]:
-        return self.comp_repo.get_all_paginated(offset, limit)
-
-    def get_competition(self, competition_id: str) -> Competition:
-        comp = self.comp_repo.get_by_id(competition_id)
-        if not comp:
-            raise NotFoundException("Competition not found")
-        return comp
-
-    def create_competition(self, comp_in: CompetitionCreate) -> Competition:
-        new_comp = Competition(
-            name=comp_in.name,
-            description=comp_in.description,
-            status=comp_in.status,
-            start_date=comp_in.start_date,
-            end_date=comp_in.end_date,
-            vote_price=comp_in.vote_price,
-            votes_per_payment=comp_in.votes_per_payment,
-            currency=comp_in.currency,
-            public_leaderboard=comp_in.public_leaderboard,
-        )
-        saved = self.comp_repo.create(new_comp)
-
-        AuditService.log_action(
-            db=self.db,
-            action="Competition Created",
-            user_id=self.user_id,
-            details=f"Created competition: {saved.name} ({saved.id})"
-        )
-        return saved
-
-    def update_competition(self, competition_id: str, comp_in: CompetitionUpdate) -> Competition:
-        comp = self.comp_repo.get_by_id(competition_id)
-        if not comp:
-            raise NotFoundException("Competition not found")
-
-        # L9 FIX: Only update fields that were actually provided (partial update)
-        update_data = comp_in.model_dump(exclude_unset=True)
-        for field, value in update_data.items():
-            setattr(comp, field, value)
-
-        self.comp_repo.update()
-
-        AuditService.log_action(
-            db=self.db,
-            action="Competition Updated",
-            user_id=self.user_id,
-            details=f"Updated competition: {comp.name} ({comp.id})"
-        )
-        return comp
-
-    def set_active_competition(self, competition_id: str) -> Competition:
-        """
-        Sets a competition as active. Deactivates any previously active competition.
-        Only one competition can be active at a time.
-        L3 FIX: Uses targeted UPDATE instead of loading all competitions.
-        """
-        comp = self.comp_repo.get_by_id(competition_id)
-        if not comp:
-            raise NotFoundException("Competition not found")
-
-        # Deactivate all other active competitions in a single query
-        self.db.execute(
-            sa_update(Competition)
-            .where(Competition.is_active.is_(True), Competition.id != competition_id)
-            .values(is_active=False)
-        )
-
-        comp.is_active = True
-        self.comp_repo.update()
-
-        AuditService.log_action(
-            db=self.db,
-            action="Competition Activated",
-            user_id=self.user_id,
-            details=f"Activated competition: {comp.name} ({comp.id})"
-        )
-        return comp
-
-    def get_active_competition(self) -> Optional[Competition]:
-        return self.comp_repo.get_active_competition()
-
+# Note: CompetitionService is no longer used as competitions have been removed
+# in favor of event-based system. This code is kept for reference only.
 
 # ---------------------------------------------------------------------------
 # EventService
@@ -693,7 +603,6 @@ class EventService:
             public_leaderboard=event_in.public_leaderboard,
             require_contestant_approval=event_in.require_contestant_approval,
             enable_videos=event_in.enable_videos,
-            competition_id=event_in.competition_id,
         )
         saved = self.event_repo.create(new_event)
 
@@ -1037,8 +946,8 @@ class ParticipantService:
             # Fallback to database query on cache failure
             return self.get_leaderboard(event_id)
 
-    def get_public_leaderboard(self, competition_id: str):
-        return self.part_repo.get_public_leaderboard(competition_id)
+    def get_public_leaderboard(self, event_id: str):
+        return self.part_repo.get_public_leaderboard(event_id)
 
 
 # ---------------------------------------------------------------------------
@@ -1066,42 +975,43 @@ class PaymentService:
         self.test_payment_repo = TestPaymentRepository(db)
         self.part_repo = ParticipantRepository(db)
         self.vote_repo = VoteTransactionRepository(db)
-        self.comp_repo = CompetitionRepository(db)
+        self.event_repo = EventRepository(db)
         self.paynow_client = PaynowClient()
         self.fraud_service = FraudDetectionService(db)
         self.idempotency_service = IdempotencyService(db)
         self.test_mode = settings.TEST_PAYMENT_MODE  # Use specific test payment mode setting
 
     def check_voter_duplicate(
-        self, phone: str, competition_id: Optional[str] = None
+        self, phone: str, event_id: Optional[str] = None
     ) -> VoterCheckResponse:
         """
         PRE-PAYMENT CHECK: Detects if a phone number has already successfully
-        voted in the current (or specified) competition.
+        voted in the current (or specified) event.
         Returns a warning if duplicate detected.
         """
-        # Resolve competition
-        comp_id = competition_id
-        if not comp_id:
-            active_comp = self.comp_repo.get_active_competition()
-            if active_comp:
-                comp_id = active_comp.id
+        # Resolve event
+        evt_id = event_id
+        if not evt_id:
+            # Try to get an active event
+            active_event = self.event_repo.get_active_event()
+            if active_event:
+                evt_id = active_event.id
 
-        if not comp_id:
-            # No competition scope, allow without warning
+        if not evt_id:
+            # No event scope, allow without warning
             return VoterCheckResponse(
                 has_voted=False,
-                message="No active competition found. Proceeding without duplicate check."
+                message="No active event found. Proceeding without duplicate check."
             )
 
-        # Check for successful payments by this phone in this competition
-        existing = self.payment_repo.get_by_voter_phone_and_competition(phone, comp_id)
+        # Check for successful payments by this phone in this event
+        existing = self.payment_repo.get_by_voter_phone_and_event(phone, evt_id)
 
         if existing:
             return VoterCheckResponse(
                 has_voted=True,
                 message="Duplicate voter detected.",
-                warning="You have already voted in this competition. Continue only if you are paying for someone else."
+                warning="You have already voted in this event. Continue only if you are paying for someone else."
             )
 
         return VoterCheckResponse(
@@ -1158,19 +1068,6 @@ class PaymentService:
                     part.status,
                 )
 
-        # 1c. Validate voting window via competition time constraints (H6 fix)
-        if part.competition_id:
-            comp = self.comp_repo.get_by_id(part.competition_id)
-            if comp and (comp.start_date or comp.end_date):
-                now = datetime.now(timezone.utc)
-                # Ensure datetimes are timezone-aware for comparison
-                start = comp.start_date.replace(tzinfo=timezone.utc) if comp.start_date and comp.start_date.tzinfo is None else comp.start_date
-                end = comp.end_date.replace(tzinfo=timezone.utc) if comp.end_date and comp.end_date.tzinfo is None else comp.end_date
-                if start and now < start:
-                    raise PaymentException("Voting has not yet opened for this competition.")
-                if end and now > end:
-                    raise PaymentException("Voting has closed for this competition.")
-
         # 1d. Validate payment method is enabled
         from app.repositories.repositories import PaymentMethodConfigRepository
         payment_method_repo = PaymentMethodConfigRepository(self.db)
@@ -1181,7 +1078,7 @@ class PaymentService:
         # 2. Duplicate voter check
         voter_check = self.check_voter_duplicate(
             payment_in.voter_phone,
-            payment_in.competition_id
+            payment_in.event_id
         )
 
         if voter_check.has_voted and not payment_in.acknowledge_duplicate:
@@ -1215,22 +1112,16 @@ class PaymentService:
         # 6. Generate reference
         reference = f"VOTE-{uuid.uuid4().hex[:8].upper()}"
 
-        # 7. Resolve competition_id and vote price with fallback chain
-        comp_id = payment_in.competition_id
+        # 7. Resolve event_id and vote price with fallback chain
+        evt_id = payment_in.event_id
         vote_price = None
         
-        # Priority: Event vote_price → Competition vote_price → Global minimum
+        # Priority: Event vote_price → Global minimum
         if hasattr(part, 'event_id') and part.event_id:
-            from app.repositories.repositories import EventRepository
-            event_repo = EventRepository(self.db)
-            event = event_repo.get_by_id(part.event_id)
+            event = self.event_repo.get_by_id(part.event_id)
             if event and event.vote_price:
                 vote_price = event.vote_price
-        
-        if not vote_price and part.competition_id:
-            comp = self.comp_repo.get_by_id(part.competition_id)
-            if comp and comp.vote_price:
-                vote_price = comp.vote_price
+                evt_id = part.event_id
         
         if not vote_price:
             vote_price = settings.MIN_PAYMENT_AMOUNT
@@ -1243,17 +1134,17 @@ class PaymentService:
         # 8. TEST MODE: Create test payment without Paynow
         if self.test_mode:
             return self._initiate_test_payment(
-                payment_in, part, reference, vote_price, comp_id, idempotency_key
+                payment_in, part, reference, vote_price, evt_id, idempotency_key
             )
 
         # 9. PRODUCTION MODE: Continue with real Paynow flow
         return self._initiate_real_payment(
-            payment_in, part, reference, vote_price, comp_id, idempotency_key
+            payment_in, part, reference, vote_price, evt_id, idempotency_key
         )
 
     def _initiate_test_payment(
         self, payment_in: PaymentCreate, part: Participant, 
-        reference: str, vote_price: float, comp_id: Optional[str],
+        reference: str, vote_price: float, evt_id: Optional[str],
         idempotency_key: Optional[str]
     ) -> Dict[str, Any]:
         """
@@ -1270,7 +1161,7 @@ class PaymentService:
             status="created",
             voter_phone=payment_in.voter_phone,
             voter_email=payment_in.voter_email,
-            competition_id=comp_id,
+            event_id=evt_id,
             test_redirect_url=test_redirect_url,
             is_test_payment=True,
             auto_complete=True,  # Auto-complete test payments after delay
@@ -1307,7 +1198,7 @@ class PaymentService:
 
     def _initiate_real_payment(
         self, payment_in: PaymentCreate, part: Participant,
-        reference: str, vote_price: float, comp_id: Optional[str],
+        reference: str, vote_price: float, evt_id: Optional[str],
         idempotency_key: Optional[str]
     ) -> Dict[str, Any]:
         """
@@ -1326,7 +1217,7 @@ class PaymentService:
             status=PaymentStatus.CREATED,
             voter_phone=payment_in.voter_phone,
             voter_email=payment_in.voter_email,
-            competition_id=comp_id,
+            event_id=evt_id,
             duplicate_vote_acknowledged=payment_in.acknowledge_duplicate,
         )
         # Persist optional idempotency key to detect client retries
