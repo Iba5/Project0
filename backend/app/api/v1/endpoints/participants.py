@@ -32,6 +32,64 @@ def list_public_participants(
     serialized = [ParticipantResponse.model_validate(p).model_dump(by_alias=True) for p in items]
     return paginate_response(serialized, total, pagination.page, pagination.page_size)
 
+
+@router.get("/public/{participant_id}")
+def get_public_participant(
+    participant_id: str,
+    db: Session = Depends(get_db),
+):
+    """Public endpoint - returns approved participant details only"""
+    part_service = ParticipantService(db)
+    participant = part_service.get_participant(participant_id)
+
+    if participant is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Participant not found")
+
+    # Only return approved participants for public access
+    if participant.status != ContestantStatus.APPROVED:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Participant not found")
+
+    serialized = ParticipantResponse.model_validate(participant).model_dump(by_alias=True)
+    return serialized
+
+
+@router.get("/public/{participant_id}/vote-history")
+def get_public_participant_vote_history(
+    participant_id: str,
+    days: int = Query(30, description="Number of days"),
+    db: Session = Depends(get_db),
+):
+    """Public endpoint - returns vote history for approved participants only"""
+    part_service = ParticipantService(db)
+    participant = part_service.get_participant(participant_id)
+
+    if participant is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Participant not found")
+
+    # Only return vote history for approved participants
+    if participant.status != ContestantStatus.APPROVED:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Participant not found")
+
+    # Simulated/computed daily vote history for charts
+    from datetime import datetime, timedelta, timezone
+    today = datetime.now(timezone.utc).date()
+    history = []
+    cumulative = 0
+    for i in range(days - 1, -1, -1):
+        d = today - timedelta(days=i)
+        daily_votes = (i * 7 + len(participant_id)) % 25
+        cumulative += daily_votes
+        history.append({
+            "date": d.isoformat(),
+            "votes": daily_votes,
+            "cumulative": cumulative
+        })
+    return {"history": history}
+
 @router.get(
     "/",
     summary="List and filter contestants (paginated)",

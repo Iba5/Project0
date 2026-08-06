@@ -24,7 +24,7 @@ import { ContestantCardSkeleton } from '@/components/shared/skeletons'
 import { useAppStore } from '@/lib/store'
 import { useRouter } from 'next/navigation'
 import {
-  getParticipant,
+  getPublicParticipant,
   type ParticipantItem,
 } from '@/lib/api'
 import { ParticipantAvatar } from '@/components/shared/participant-avatar'
@@ -795,7 +795,7 @@ export default function CompareView() {
     async function fetchParticipants() {
       try {
         const results = await Promise.all(
-          compareIds.map((id) => getParticipant(id).then((res) => res.participant))
+          compareIds.map((id) => getPublicParticipant(id))
         )
         if (mounted) {
           setParticipants(results)

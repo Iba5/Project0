@@ -28,7 +28,7 @@ import { Label } from '@/components/ui/label'
 import { useAppStore } from '@/lib/store'
 import { useRouter } from 'next/navigation'
 import {
-  getParticipant,
+  getPublicParticipant,
   initiatePayment,
   getPaymentMethods,
   paymentMethods as fallbackPaymentMethods,
@@ -344,14 +344,14 @@ export default function PaymentView({ participantId }: { participantId: string }
     async function loadParticipant() {
       if (!paymentParticipantId) return
       try {
-        const data = await getParticipant(paymentParticipantId)
-        setParticipantName(data.participant.name)
-        setParticipantCategory(data.participant.category)
-        
+        const data = await getPublicParticipant(paymentParticipantId)
+        setParticipantName(data.name)
+        setParticipantCategory(data.category)
+
         // Load vote price from participant's event
-        if (data.participant.eventId) {
+        if (data.eventId) {
           try {
-            const eventResponse = await apiFetch(`/events/${data.participant.eventId}`) as { event?: { votePrice?: number } }
+            const eventResponse = await apiFetch(`/events/${data.eventId}`) as { event?: { votePrice?: number } }
             if (eventResponse.event?.votePrice) {
               setVotePrice(eventResponse.event.votePrice)
             }

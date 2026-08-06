@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useRef, useMemo } from 'react'
+import { useEffect, useState, useRef, useMemo, useCallback } from 'react'
 import { motion, AnimatePresence, type Variants } from 'framer-motion'
 import {
   Play,
@@ -17,6 +17,7 @@ import {
   GitCompare,
   Check,
   X,
+  CalendarDays,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -30,11 +31,13 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useAppStore } from '@/lib/store'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import {
   getPublicParticipants,
   getPublicLeaderboard,
+  listPublicEvents,
   type PublicParticipant,
+  type EventItem,
 } from '@/lib/api'
 import { useRealtime, type VoteUpdateData } from '@/hooks/use-realtime'
 import { ParticipantAvatar } from '@/components/shared/participant-avatar'
@@ -46,6 +49,38 @@ const DEFAULT_CATEGORIES = ['All']
 
 type SortOption = 'recent' | 'votes' | 'trending' | 'az'
 type ViewMode = 'grid' | 'list'
+type EventStatusFilter = 'all' | 'voting' | 'upcoming' | 'ended'
+
+const EVENT_STATUS_OPTIONS: { key: EventStatusFilter; label: string }[] = [
+  { key: 'all', label: 'All Events' },
+  { key: 'voting', label: 'Ongoing' },
+  { key: 'upcoming', label: 'Upcoming' },
+  { key: 'ended', label: 'Ended' },
+]
+
+// Groups the backend's computed_status string (see event_utils.py:
+// get_computed_event_status — lowercase snake_case values like
+// "voting_open", "upcoming", "completed", "registration_open") into one of
+// the filter buckets. Mirrors the classification on the public Events
+// browser so the two stay in sync.
+function classifyEventStatus(computedStatus: string | undefined): 'voting' | 'upcoming' | 'ended' | 'active' {
+  const s = (computedStatus || '').toLowerCase()
+  if (s === 'voting_open') return 'voting'
+  if (s === 'upcoming') return 'upcoming'
+  if (['completed', 'voting_closed', 'archived', 'cancelled'].includes(s)) return 'ended'
+  return 'active'
+}
+
+function matchesEventStatusFilter(
+  bucket: ReturnType<typeof classifyEventStatus>,
+  filter: EventStatusFilter,
+): boolean {
+  if (filter === 'all') return true
+  if (filter === 'voting') return bucket === 'voting'
+  if (filter === 'upcoming') return bucket === 'upcoming' || bucket === 'active'
+  if (filter === 'ended') return bucket === 'ended'
+  return true
+}
 
 const containerVariants: Variants = {
   hidden: { opacity: 0 },
@@ -189,8 +224,17 @@ function ContestantCardSkeleton() {
 }
 
 export default function ContestantsView() {
-  const { categoryFilter, setCategoryFilter, compareIds, setCompareIds } = useAppStore()
+  const { categoryFilter, setCategoryFilter, compareIds, setCompareIds, setSelectedEventId } =
+    useAppStore()
   const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  // The event we're scoped to lives in the URL (?event=<id>) so refreshing
+  // or sharing the link keeps the same filtered view. Falls back to "All
+  // Events" (global list) when absent.
+  const eventIdParam = searchParams.get('event')
+
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [participants, setParticipants] = useState<PublicParticipant[]>([])
   const [loading, setLoading] = useState(true)
@@ -201,6 +245,73 @@ export default function ContestantsView() {
   const [isLive, setIsLive] = useState(false)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
 
+  // ─── Event filter (status tabs + dynamic dropdown) ──────────────
+  const [events, setEvents] = useState<EventItem[]>([])
+  const [eventsLoading, setEventsLoading] = useState(true)
+  const [eventStatusFilter, setEventStatusFilter] = useState<EventStatusFilter>('all')
+
+  // Load all public events once; the status tabs + dropdown both filter
+  // this same list client-side, same pattern as the Events browser.
+  useEffect(() => {
+    let mounted = true
+    async function loadEvents() {
+      try {
+        const { items } = await listPublicEvents()
+        if (!mounted) return
+        const visible = (items || []).filter((e) => (e.status || '').toLowerCase() !== 'draft')
+        setEvents(visible)
+      } catch {
+        // silent — event dropdown just won't populate
+      } finally {
+        if (mounted) setEventsLoading(false)
+      }
+    }
+    loadEvents()
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  // Events available in the dropdown, filtered by the active status tab.
+  const dropdownEvents = useMemo(() => {
+    return events.filter((e) => matchesEventStatusFilter(classifyEventStatus(e.computedStatus), eventStatusFilter))
+  }, [events, eventStatusFilter])
+
+  // If the currently-selected event falls out of the dropdown (status tab
+  // changed to a bucket that no longer contains it), clear the selection
+  // rather than silently keeping a stale, hidden filter active.
+  useEffect(() => {
+    if (!eventIdParam) return
+    if (eventsLoading) return
+    const stillVisible = dropdownEvents.some((e) => e.id === eventIdParam)
+    if (!stillVisible) {
+      setSelectedEventId(null)
+      router.replace(pathname)
+    }
+  }, [eventStatusFilter, eventsLoading, eventIdParam, dropdownEvents, pathname, router, setSelectedEventId])
+
+  const handleEventStatusChange = (key: EventStatusFilter) => {
+    setEventStatusFilter(key)
+  }
+
+  const handleEventSelect = useCallback(
+    (eventId: string) => {
+      if (eventId === 'all') {
+        setSelectedEventId(null)
+        router.push(pathname)
+        return
+      }
+      setSelectedEventId(eventId)
+      router.push(`${pathname}?event=${eventId}`)
+    },
+    [pathname, router, setSelectedEventId],
+  )
+
+  const selectedEvent = useMemo(
+    () => events.find((e) => e.id === eventIdParam) ?? null,
+    [events, eventIdParam],
+  )
+
   const safeParticipants = Array.isArray(participants) ? participants : []
 
   // Derive categories from the loaded participants data
@@ -209,12 +320,17 @@ export default function ContestantsView() {
     return ['All', ...unique.sort()]
   }, [safeParticipants])
 
-  // Initial load + leaderboard fetch
+  // Initial load + leaderboard fetch — re-runs whenever the URL's ?event=
+  // param changes, so switching or clearing the event filter re-scopes
+  // the participant list rather than silently keeping the old data.
   useEffect(() => {
     let mounted = true
+    queueMicrotask(() => {
+      if (mounted) setLoading(true)
+    })
     async function loadParticipants() {
       try {
-        const data = await getPublicParticipants(1, 100)
+        const data = await getPublicParticipants(1, 100, eventIdParam ?? undefined)
         if (mounted) setParticipants(Array.isArray(data?.items) ? data.items : [])
       } catch {
         // silent
@@ -240,7 +356,7 @@ export default function ContestantsView() {
     return () => {
       mounted = false
     }
-  }, [])
+  }, [eventIdParam])
 
   // Real-time vote updates via WebSocket (with fallback polling at 30s)
   const { onLeaderboardUpdate } = useRealtime()
@@ -264,7 +380,7 @@ export default function ContestantsView() {
     // Fallback polling at 30s in case WebSocket disconnects
     const interval = setInterval(async () => {
       try {
-        const data = await getPublicParticipants(1, 100)
+        const data = await getPublicParticipants(1, 100, eventIdParam ?? undefined)
         const nextParticipants = Array.isArray(data?.items) ? data.items : []
         setParticipants((prev) => {
           const prevVotes = JSON.stringify(prev.map((p) => p.votes))
@@ -288,7 +404,7 @@ export default function ContestantsView() {
       unsubscribe()
       clearInterval(interval)
     }
-  }, [onLeaderboardUpdate])
+  }, [onLeaderboardUpdate, eventIdParam])
 
   // Filtered + sorted list (client-side sort)
   const filtered = useMemo(() => {
@@ -407,7 +523,11 @@ export default function ContestantsView() {
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {loading ? 'Loading...' : `${filtered.length} performers`}
+                  {loading
+                    ? 'Loading...'
+                    : selectedEvent
+                      ? `${filtered.length} performers · ${selectedEvent.name}`
+                      : `${filtered.length} performers`}
                 </p>
               </div>
             </div>
@@ -434,6 +554,56 @@ export default function ContestantsView() {
                 <span className="hidden sm:inline">Share Event</span>
               </Button>
             </div>
+          </div>
+
+          {/* Event status tabs + dynamic event dropdown */}
+          <div className="flex flex-col sm:flex-row gap-2 mb-3">
+            <div className="flex gap-1 overflow-x-auto scrollbar-thin pb-1 sm:pb-0 shrink-0">
+              {EVENT_STATUS_OPTIONS.map((option) => {
+                const isActive = eventStatusFilter === option.key
+                return (
+                  <button
+                    key={option.key}
+                    onClick={() => handleEventStatusChange(option.key)}
+                    className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs font-semibold transition-all duration-300 border ${
+                      isActive
+                        ? 'bg-gold-500 text-[#0B0F17] border-gold-500'
+                        : 'bg-transparent text-muted-foreground border-border hover:border-gold-500/40'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* Event dropdown — options update to match the active status tab */}
+            <Select
+              value={eventIdParam ?? 'all'}
+              onValueChange={handleEventSelect}
+              disabled={eventsLoading}
+            >
+              <SelectTrigger className="w-full sm:w-[220px] bg-surface border-border rounded-full text-sm">
+                <div className="flex items-center gap-2 min-w-0">
+                  <CalendarDays className="size-4 text-gold-400 shrink-0" />
+                  <SelectValue placeholder="All Events" />
+                </div>
+              </SelectTrigger>
+              <SelectContent className="bg-surface border-border">
+                <SelectItem value="all">All Events</SelectItem>
+                {dropdownEvents.length === 0 && !eventsLoading ? (
+                  <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                    No events in this status
+                  </div>
+                ) : (
+                  dropdownEvents.map((event) => (
+                    <SelectItem key={event.id} value={event.id}>
+                      {event.name}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Search + Sort + View Toggle */}

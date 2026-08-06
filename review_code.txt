@@ -1,0 +1,2304 @@
+================ backend/app/api/v1/endpoints/participants.py ================
+from typing import List, Optional
+from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy.orm import Session
+
+from app.core.database import get_db
+from app.api.v1.dependencies import PermissionChecker, get_current_active_user, PaginationParams
+from app.enums.enums import Permission, ContestantStatus
+from app.services.services import ParticipantService
+from app.schemas.schemas import ParticipantCreate, ParticipantResponse, ParticipantUpdate
+from app.repositories.repositories import paginate_response
+from app.models.models import User
+
+router = APIRouter()
+
+allow_read = Depends(PermissionChecker(Permission.CONTESTANTS_READ))
+allow_update = Depends(PermissionChecker(Permission.CONTESTANTS_UPDATE))
+
+@router.get("/public")
+def list_public_participants(
+    search: Optional[str] = None,
+    event_id: Optional[str] = None,
+    pagination: PaginationParams = Depends(),
+    db: Session = Depends(get_db),
+):
+    """Public endpoint - returns approved participants only"""
+    part_service = ParticipantService(db)
+
+    items, total = part_service.list_participants(
+        search, ContestantStatus.APPROVED, event_id, pagination.offset, pagination.limit
+    )
+
+    serialized = [ParticipantResponse.model_validate(p).model_dump(by_alias=True) for p in items]
+    return paginate_response(serialized, total, pagination.page, pagination.page_size)
+
+@router.get(
+    "/",
+    summary="List and filter contestants (paginated)",
+    description="Admin endpoint - returns all participants including drafts",
+    dependencies=[allow_read]
+)
+def list_participants(
+    search: Optional[str] = Query(None, description="Search by name or category"),
+    status: Optional[ContestantStatus] = Query(None, description="Filter by contestant lifecycle status"),
+    event_id: Optional[str] = Query(None, description="Filter by event"),
+    pagination: PaginationParams = Depends(),
+    db: Session = Depends(get_db)
+):
+    """Admin endpoint - requires authentication"""
+    part_service = ParticipantService(db)
+    items, total = part_service.list_participants(
+        search, status, event_id,
+        pagination.offset, pagination.limit
+    )
+    serialized = [ParticipantResponse.model_validate(p).model_dump(by_alias=True) for p in items]
+    return paginate_response(serialized, total, pagination.page, pagination.page_size)
+
+
+# C4 FIX: /leaderboard, /compare, /bulk MUST be registered before /{part_id}
+# to prevent FastAPI from matching them as a part_id path param.
+@router.get(
+    "/leaderboard",
+    summary="Get public leaderboard",
+    description="Returns contestants ordered by votes."
+)
+@router.get(
+    "/leaderboard/view",
+    summary="Get public leaderboard (alias)",
+    description="Returns contestants ordered by votes. No voter PII exposed."
+)
+async def get_public_leaderboard(
+    event_id: Optional[str] = Query(None, description="Optional event ID"),
+    db: Session = Depends(get_db)
+):
+    part_service = ParticipantService(db)
+    leaderboard_data = await part_service.get_leaderboard_cached(event_id)
+    return {"leaderboard": leaderboard_data}
+
+
+@router.get(
+    "/compare",
+    summary="Compare contestants by IDs"
+)
+def compare_participants(
+    ids: str = Query(..., description="Comma-separated participant IDs"),
+    db: Session = Depends(get_db)
+):
+    part_service = ParticipantService(db)
+    id_list = [i.strip() for i in ids.split(",") if i.strip()]
+    results = [part_service.get_participant(pid) for pid in id_list]
+    return {"participants": results}
+
+
+@router.patch(
+    "/bulk",
+    summary="Bulk update contestant statuses or delete"
+)
+def bulk_update_participants(
+    payload: dict,
+    current_user: User = allow_update,
+    db: Session = Depends(get_db)
+):
+    part_service = ParticipantService(db, user_id=current_user.id)
+    ids = payload.get("ids", [])
+    action = payload.get("action")
+    count = 0
+    for pid in ids:
+        if action == "approve":
+            part_service.update_participant_status(pid, ContestantStatus.APPROVED)
+            count += 1
+        elif action == "reject":
+            part_service.update_participant_status(pid, ContestantStatus.REJECTED)
+            count += 1
+        elif action == "disqualify":
+            part_service.update_participant_status(pid, ContestantStatus.DISQUALIFIED)
+            count += 1
+        elif action == "delete":
+            part_service.delete_participant(pid)
+            count += 1
+    return {"success": True, "affected": count}
+
+
+@router.get(
+    "/{part_id}",
+    response_model=ParticipantResponse,
+    summary="Get single contestant details",
+    dependencies=[allow_read]
+)
+def get_participant(part_id: str, db: Session = Depends(get_db)):
+    part_service = ParticipantService(db)
+    return part_service.get_participant(part_id)
+
+
+@router.get(
+    "/{part_id}/vote-history",
+    summary="Get vote history for a contestant"
+)
+def get_participant_vote_history(
+    part_id: str,
+    days: int = Query(30, description="Number of days"),
+    db: Session = Depends(get_db)
+):
+    # Simulated/computed daily vote history for charts
+    from datetime import datetime, timedelta, timezone
+    today = datetime.now(timezone.utc).date()
+    history = []
+    cumulative = 0
+    for i in range(days - 1, -1, -1):
+        d = today - timedelta(days=i)
+        daily_votes = (i * 7 + len(part_id)) % 25
+        cumulative += daily_votes
+        history.append({
+            "date": d.isoformat(),
+            "votes": daily_votes,
+            "cumulative": cumulative
+        })
+    return {"history": history}
+
+
+@router.post(
+    "/",
+    response_model=dict[str, ParticipantResponse],
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new contestant"
+)
+def create_participant(
+    part_in: ParticipantCreate,
+    current_user: User = allow_update,
+    db: Session = Depends(get_db)
+):
+    part_service = ParticipantService(db, user_id=current_user.id)
+    created = part_service.create_participant(part_in)
+    return {
+        "participant": ParticipantResponse.model_validate(created).model_dump(by_alias=True)
+    }
+
+
+@router.patch(
+    "/{part_id}",
+    response_model=dict[str, ParticipantResponse],
+    summary="Update contestant details"
+)
+def update_participant(
+    part_id: str,
+    part_in: ParticipantUpdate,
+    current_user: User = allow_update,
+    db: Session = Depends(get_db)
+):
+    part_service = ParticipantService(db, user_id=current_user.id)
+    participant = part_service.get_participant(part_id)
+    if participant is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Participant not found")
+
+    update_data = part_in.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        if field != "status":
+            setattr(participant, field, value)
+
+    if "status" in update_data:
+        participant.status = update_data["status"]
+
+    part_service.part_repo.update()
+    return {
+        "participant": ParticipantResponse.model_validate(participant).model_dump(by_alias=True)
+    }
+
+
+@router.patch(
+    "/{part_id}/status",
+    response_model=ParticipantResponse,
+    summary="Approve or update contestant registration status"
+)
+def update_status(
+    part_id: str,
+    status_val: ContestantStatus = Query(..., alias="status"),
+    current_user: User = allow_update,
+    db: Session = Depends(get_db)
+):
+    part_service = ParticipantService(db, user_id=current_user.id)
+    return part_service.update_participant_status(part_id, status_val)
+
+
+@router.delete(
+    "/{part_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a contestant"
+)
+def delete_participant(
+    part_id: str,
+    current_user: User = allow_update,
+    db: Session = Depends(get_db)
+):
+    part_service = ParticipantService(db, user_id=current_user.id)
+    part_service.delete_participant(part_id)
+
+
+================ frontend/lib/api.ts ================
+import { apiUrl, apiFetch, storeToken, clearToken } from './api-client'
+import type { AdminUser } from './store'
+import { useAppStore } from './store'
+import { setPlatformTimezone } from './date-utils'
+
+
+// ─── Auth ────────────────────────────────────────────────────────
+
+export async function login(email: string, password: string): Promise<{ user: AdminUser }> {
+  console.log('[API] Login called for:', email)
+  const response = await apiFetch<{ user: AdminUser; token: string; refreshToken?: string }>('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password }),
+  })
+  
+  console.log('[API] Login response:', response)
+  
+  // Store the access token for subsequent requests (refresh token is in httpOnly cookie)
+  if (response.token) {
+    console.log('[API] Storing token:', response.token.substring(0, 20) + '...')
+    storeToken(response.token)
+  }
+  
+  // Update the store with user data from backend
+  if (typeof window !== 'undefined') {
+    const { setAdminUser } = useAppStore.getState()
+    setAdminUser(response.user)
+  }
+  
+  return { user: response.user }
+}
+
+export async function logout(): Promise<void> {
+  try {
+    await apiFetch('/auth/logout', { method: 'POST' })
+  } finally {
+    // Clear access token regardless of logout success (refresh token is cleared by backend)
+    clearToken()
+    // Clear admin user from store
+    if (typeof window !== 'undefined') {
+      const { setAdminUser } = useAppStore.getState()
+      setAdminUser(null)
+    }
+  }
+}
+
+export async function getMe(): Promise<{ user: AdminUser }> {
+  console.log('[API] getMe called')
+  try {
+    const result = await apiFetch<{ user: AdminUser }>('/auth/me')
+    console.log('[API] getMe result:', result)
+    // Update the store with user data from backend
+    if (typeof window !== 'undefined') {
+      const { setAdminUser } = useAppStore.getState()
+      setAdminUser(result.user)
+    }
+    return result
+  } catch (error) {
+    console.error('[API] getMe failed:', error)
+    throw error
+  }
+}
+
+export async function signup(
+  name: string,
+  email: string,
+  password: string,
+  bootstrapToken?: string,
+): Promise<{ user: AdminUser; isFirstUser: boolean }> {
+  const headers: Record<string, string> = {}
+  if (bootstrapToken) {
+    headers['X-Bootstrap-Token'] = bootstrapToken
+  }
+
+  const response = await apiFetch<{ user: AdminUser; token: string; refreshToken?: string; isFirstUser: boolean }>('/auth/signup', {
+    method: 'POST',
+    body: JSON.stringify({ name, email, password }),
+    headers,
+  })
+
+  // Store the access token for subsequent requests (refresh token is in httpOnly cookie)
+  if (response.token) {
+    storeToken(response.token)
+  }
+
+  // Update the store with user data from backend
+  if (typeof window !== 'undefined') {
+    const { setAdminUser } = useAppStore.getState()
+    setAdminUser(response.user)
+  }
+
+  return { user: response.user, isFirstUser: response.isFirstUser }
+}
+
+export async function forgotPassword(email: string): Promise<{ message: string }> {
+  return apiFetch('/auth/forgot-password', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  })
+}
+
+export async function resetPassword(token: string, newPassword: string): Promise<{ message: string }> {
+  return apiFetch('/auth/reset-password', {
+    method: 'POST',
+    body: JSON.stringify({ token, newPassword }),
+  })
+}
+
+export async function verifyInvitation(token: string): Promise<{ valid: boolean; email: string; role: string }> {
+  return apiFetch(`/auth/invitation/${token}`)
+}
+
+export async function completeSignup(token: string, name: string, password: string): Promise<{ user: any; token: string; message: string }> {
+  return apiFetch('/auth/complete-signup', {
+    method: 'POST',
+    body: JSON.stringify({ token, name, password }),
+  })
+}
+// ─── Dashboard ───────────────────────────────────────────────────
+
+export type DashboardRange = '7d' | '30d' | '90d' | 'ytd' | 'all'
+
+export interface RevenueTrendPoint {
+  date: string
+  total: number
+}
+
+export interface VotesByCategoryPoint {
+  category: string
+  votes: number
+}
+
+export interface TopPaymentMethodPoint {
+  method: string
+  total: number
+  count: number
+}
+
+export interface VoteTrendPoint {
+  date: string
+  votes: number
+}
+
+export interface TopPerformerEntry {
+  id: string
+  name: string
+  category: string
+  votes: number
+  trend: 'up' | 'down' | 'same'
+  trendVotes: number
+  imageUrl: string | null
+  thumbnailUrl: string | null
+}
+
+export interface EnhancedActivityEntry {
+  id: string
+  title: string
+  detail: string | null
+  time: string
+  category: string | null
+  participantName: string | null
+  voteCount: number | null
+}
+
+export interface DashboardSummary {
+  activeEvent: {
+    id: string
+    name: string
+    status: string
+  } | null
+  totalParticipants: number
+  totalVotes: number
+  totalRevenue: number
+  recentPayments: Array<{
+    id: string
+    reference: string
+    amount: number
+    status: string
+    paymentMethod: string
+    createdAt: string
+  }>
+  recentActivity: Array<{
+    id: string
+    title: string
+    detail: string | null
+    time: string
+  }>
+  range: DashboardRange
+  dateFrom: string | null
+  revenueTrend: RevenueTrendPoint[]
+  votesByCategory: VotesByCategoryPoint[]
+  topPaymentMethods: TopPaymentMethodPoint[]
+  voteTrend: VoteTrendPoint[]
+  topPerformers: TopPerformerEntry[]
+  enhancedRecentActivity: EnhancedActivityEntry[]
+}
+
+export async function getDashboardSummary(
+  range?: DashboardRange | string,
+): Promise<DashboardSummary> {
+  const qs = range ? `?range=${encodeURIComponent(range)}` : ''
+  return apiFetch(`/dashboard${qs}`)
+}
+
+export const getDashboard = getDashboardSummary
+
+// ─── Events ──────────────────────────────────────────────────────
+
+export interface EventItem {
+  id: string
+  name: string
+  description: string | null
+  banner: string | null
+  startDate: string
+  endDate: string
+  status: string
+  computedStatus?: string
+  votePrice: number
+  votesPerPayment: number
+  currency: string
+  registrationOpens: string | null
+  registrationCloses: string | null
+  votingOpens: string | null
+  votingCloses: string | null
+  publicLeaderboard: boolean
+  requireContestantApproval: boolean
+  enableVideos: boolean
+  shareLink: string | null
+  eventId: string | null
+  createdAt: string
+  deletedAt: string | null
+  participantCount?: number
+}
+
+export interface PaginationInfo {
+  page: number
+  limit: number
+  total: number
+  totalPages: number
+}
+
+export interface ListEventsParams {
+  search?: string
+  status?: string
+}
+
+export async function listEvents(params?: ListEventsParams): Promise<{ items: EventItem[]; pagination: PaginationInfo }> {
+  const searchParams = new URLSearchParams()
+  if (params?.search) searchParams.set('search', params.search)
+  if (params?.status) searchParams.set('status', params.status)
+  const qs = searchParams.toString()
+  return apiFetch(`/events/admin${qs ? `?${qs}` : ''}`)
+}
+
+export async function listPublicEvents(): Promise<{ items: EventItem[]; pagination: PaginationInfo }> {
+  return apiFetch('/events')
+}
+
+export async function getEvent(id: string): Promise<EventItem> {
+  return apiFetch(`/events/${id}`)
+}
+
+export async function createEvent(payload: Record<string, unknown>): Promise<{ id: string; event: EventItem }> {
+  return apiFetch('/events', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function updateEvent(id: string, payload: Record<string, unknown>): Promise<EventItem> {
+  return apiFetch(`/events/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function deleteEvent(id: string): Promise<void> {
+  return apiFetch(`/events/${id}`, { method: 'DELETE' })
+}
+
+export async function publishEvent(id: string): Promise<{ event: EventItem }> {
+  return apiFetch(`/events/${id}/publish`, {
+    method: 'POST',
+  })
+}
+
+// ─── Participants ────────────────────────────────────────────────
+
+export interface ParticipantItem {
+  id: string
+  name: string
+  category: string
+  videoUrl: string | null
+  imageUrl: string | null
+  thumbnailUrl: string | null
+  bio: string | null
+  status: string
+  votes: number
+  eventId: string | null
+  createdAt: string
+  deletedAt: string | null
+}
+
+export interface ListParticipantsParams {
+  search?: string
+  status?: string
+  eventId?: string
+  category?: string
+}
+
+export async function listParticipants(params?: ListParticipantsParams): Promise<{ items: ParticipantItem[]; pagination: PaginationInfo }> {
+  const searchParams = new URLSearchParams()
+  if (params?.search) searchParams.set('search', params.search)
+  if (params?.status) searchParams.set('status', params.status)
+  if (params?.eventId) searchParams.set('eventId', params.eventId)
+  if (params?.category) searchParams.set('category', params.category)
+  const qs = searchParams.toString()
+  return apiFetch(`/participants${qs ? `?${qs}` : ''}`)
+}
+
+export async function listPublicParticipants(params?: ListParticipantsParams): Promise<{ items: ParticipantItem[]; pagination: PaginationInfo }> {
+  const searchParams = new URLSearchParams()
+  if (params?.search) searchParams.set('search', params.search)
+  if (params?.eventId) searchParams.set('eventId', params.eventId)
+  if (params?.category) searchParams.set('category', params.category)
+  const qs = searchParams.toString()
+  return apiFetch(`/participants/public${qs ? `?${qs}` : ''}`)
+}
+
+export async function createParticipant(payload: Record<string, unknown>): Promise<{ participant: ParticipantItem }> {
+  return apiFetch('/participants', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function updateParticipant(id: string, payload: Record<string, unknown>): Promise<{ participant: ParticipantItem }> {
+  return apiFetch(`/participants/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function deleteParticipant(id: string): Promise<void> {
+  return apiFetch(`/participants/${id}`, { method: 'DELETE' })
+}
+
+export type BulkParticipantAction = 'approve' | 'reject' | 'disqualify' | 'delete'
+
+export async function bulkUpdateParticipants(
+  ids: string[],
+  action: BulkParticipantAction,
+): Promise<{ success: boolean; affected: number }> {
+  return apiFetch('/participants/bulk', {
+    method: 'PATCH',
+    body: JSON.stringify({ ids, action }),
+  })
+}
+
+// ─── Payments ────────────────────────────────────────────────────
+
+export interface PaymentItem {
+  id: string
+  reference: string
+  contestantId: string | null
+  amount: number
+  paymentMethod: string
+  status: string
+  voterName: string | null
+  voterEmail: string | null
+  date: string
+  createdAt: string
+}
+
+export async function listPayments(params?: { status?: string; eventId?: string }): Promise<{ items: PaymentItem[]; payments: PaymentItem[]; pagination: PaginationInfo }> {
+  const searchParams = new URLSearchParams()
+  if (params?.status) searchParams.set('status', params.status)
+  if (params?.eventId) searchParams.set('eventId', params.eventId)
+  const qs = searchParams.toString()
+  const res = await apiFetch<any>(`/payments${qs ? `?${qs}` : ''}`)
+  return {
+    items: res.items || res.payments || [],
+    payments: res.payments || res.items || [],
+    pagination: res.pagination || { total: (res.payments || res.items || []).length, page: 1, limit: 10, totalPages: 1 }
+  }
+}
+
+
+// ─── Settings ────────────────────────────────────────────────────
+
+export interface SettingsItem {
+  id: number
+  companyName: string
+  supportEmail: string
+  supportPhone?: string
+  timezone: string
+  emailNotifications: boolean
+  smsNotifications: boolean
+  marketingNotifications: boolean
+}
+
+export async function getSettings(): Promise<{ settings: SettingsItem }> {
+  const res = await apiFetch<{ settings: SettingsItem }>('/settings')
+  if (res?.settings?.timezone) {
+    setPlatformTimezone(res.settings.timezone)
+  }
+  return res
+}
+
+export async function updateSettings(payload: Record<string, unknown>): Promise<{ settings: SettingsItem }> {
+  const res = await apiFetch<{ settings: SettingsItem }>('/settings', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+  if (res?.settings?.timezone) {
+    setPlatformTimezone(res.settings.timezone)
+  }
+  return res
+}
+
+
+export async function getR2Usage(): Promise<unknown> {
+  return apiFetch('/settings/r2-usage')
+}
+
+// ─── Admins ──────────────────────────────────────────────────────
+
+export interface AdminItem {
+  id: string
+  email: string
+  name: string
+  role: string
+  isActive: boolean
+  createdAt: string
+}
+
+export async function listAdmins(): Promise<{ admins: AdminItem[] }> {
+  return apiFetch('/admins')
+}
+
+export async function inviteAdmin(payload: { email: string; name: string; role?: string }): Promise<{ admin: AdminItem }> {
+  return apiFetch('/admins', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+// ─── Public API ───────────────────────────────────────────────────
+
+export async function getPublicEvent(eventId: string): Promise<EventItem> {
+  return apiFetch(`/public/events/${eventId}`)
+}
+
+export async function getPublicEventParticipants(eventId: string): Promise<{ participants: ParticipantItem[] }> {
+  return apiFetch(`/public/events/${eventId}/participants`)
+}
+
+export async function getPublicParticipant(participantId: string): Promise<ParticipantItem> {
+  return apiFetch(`/public/participants/${participantId}`)
+}
+
+// ─── Public API (no auth required) ──────────────────────────────
+
+export interface PublicParticipant {
+  id: string
+  name: string
+  category: string
+  videoUrl: string
+  imageUrl: string | null
+  thumbnailUrl: string | null
+  bio: string | null
+  votes: number
+  createdAt: string
+}
+
+export type PublicLeaderboardEntry = PublicParticipant
+
+export interface PublicStats {
+  totalParticipants: number
+  totalVotes: number
+  daysRemaining: number
+  activeEvent: {
+    id: string
+    name: string
+    status: string
+    endDate: string
+    votePrice: number
+  } | null
+}
+
+export interface PaymentMethod {
+  id: string
+  method: string
+  methodType: string
+  displayName: string
+  description?: string
+  isEnabled: boolean
+  sortOrder: number
+  iconName?: string
+  configData?: Record<string, unknown>
+  createdAt: string
+  updatedAt: string
+}
+
+export async function getPaymentMethods(): Promise<PaymentMethod[]> {
+  return apiFetch('/payment-methods/public')
+}
+
+// Fallback hardcoded payment methods (will be replaced by API call)
+export const paymentMethods: PaymentMethod[] = [
+  { id: 'ecocash', method: 'ecocash', methodType: 'mobile', displayName: 'EcoCash', isEnabled: true, sortOrder: 1, iconName: 'smartphone', createdAt: '', updatedAt: '' },
+  { id: 'onemoney', method: 'onemoney', methodType: 'mobile', displayName: 'OneMoney', isEnabled: true, sortOrder: 2, iconName: 'smartphone', createdAt: '', updatedAt: '' },
+  { id: 'visa', method: 'visa', methodType: 'web', displayName: 'Visa', isEnabled: true, sortOrder: 3, iconName: 'credit-card', createdAt: '', updatedAt: '' },
+  { id: 'mastercard', method: 'mastercard', methodType: 'web', displayName: 'Mastercard', isEnabled: true, sortOrder: 4, iconName: 'credit-card', createdAt: '', updatedAt: '' },
+]
+
+export async function getPublicParticipants(
+  page = 1,
+  limit = 50,
+): Promise<{ items: PublicParticipant[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> {
+  return apiFetch(`/participants/public?page=${page}&limit=${limit}`)
+}
+
+export async function getParticipant(id: string): Promise<{ participant: ParticipantItem }> {
+  return apiFetch(`/participants/${id}`)
+}
+
+export async function getPublicLeaderboard(): Promise<{ leaderboard: PublicLeaderboardEntry[] }> {
+  return apiFetch('/participants/leaderboard')
+}
+
+export async function getPublicStats(): Promise<PublicStats> {
+  return apiFetch('/stats')
+}
+
+export function validatePhone(phone: string): boolean {
+  const cleaned = phone.replace(/[\s+]/g, '')
+  return /^\d{8,15}$/.test(cleaned)
+}
+
+export async function initiatePayment(data: {
+  amount: number
+  paymentMethod: string
+  contestantId: string
+  voterPhone?: string
+  voterName?: string
+  voterEmail?: string
+  idempotencyKey: string
+}): Promise<{ payment: PaymentItem & { pollUrl: string | null; paynowRedirectUrl: string | null }; idempotent: boolean }> {
+  if (data.voterPhone && !validatePhone(data.voterPhone)) {
+    throw new Error('Invalid phone number format. Must be between 8 and 15 digits.')
+  }
+  return apiFetch('/payments', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+// ─── Search ──────────────────────────────────────────────────────
+
+export async function searchGlobal(query: string): Promise<unknown> {
+  return apiFetch(`/search?q=${encodeURIComponent(query)}`)
+}
+
+// ─── Newsletter ──────────────────────────────────────────────────
+
+export async function subscribeNewsletter(email: string): Promise<{ message: string }> {
+  return apiFetch('/newsletter/subscribe', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  })
+}
+
+// ─── Activity ────────────────────────────────────────────────────
+
+export async function getActivity(): Promise<unknown> {
+  return apiFetch('/activity')
+}
+
+// ─── Notifications ───────────────────────────────────────────────
+
+export async function getNotifications(): Promise<unknown> {
+  return apiFetch('/notifications')
+}
+
+// ─── Compare ─────────────────────────────────────────────────────
+
+export async function compareParticipants(ids: string[]): Promise<unknown> {
+  return apiFetch(`/participants/compare?ids=${ids.join(',')}`)
+}
+
+// ─── Payment Status Check ───────────────────────────────────────
+
+export async function checkPaymentStatus(reference: string): Promise<unknown> {
+  return apiFetch(`/payments/check-status/${encodeURIComponent(reference)}`)
+}
+
+// ─── Audit Logs ─────────────────────────────────────────────────
+
+export async function listAuditLogs(opts?: { limit?: number; offset?: number; action?: string }): Promise<unknown> {
+  const searchParams = new URLSearchParams()
+  if (opts?.limit !== undefined) searchParams.set('limit', String(opts.limit))
+  if (opts?.offset !== undefined) searchParams.set('offset', String(opts.offset))
+  if (opts?.action) searchParams.set('action', opts.action)
+  const qs = searchParams.toString()
+  return apiFetch(`/audit-logs${qs ? `?${qs}` : ''}`)
+}
+
+// ─── Vote History ────────────────────────────────────────────────
+
+export async function getParticipantVoteHistory(
+  id: string,
+  days: 7 | 30 = 30,
+): Promise<{ history: Array<{ date: string; votes: number; cumulative: number }> }> {
+  return apiFetch(`/participants/${id}/vote-history?days=${days}`)
+}
+
+// ─── Image Upload ────────────────────────────────────────────────
+
+export async function uploadImage(file: File): Promise<{ url: string; fileName: string }> {
+  const formData = new FormData()
+  formData.append('image', file)
+  formData.append('fileName', file.name)
+
+  const res = await fetch(apiUrl('/upload'), {
+    method: 'POST',
+    body: formData,
+    credentials: 'include', // Important for sending httpOnly cookies
+  })
+
+  const data = await res.json()
+  if (!res.ok) {
+    throw new Error(data?.detail || data?.error || 'Failed to upload image')
+  }
+
+  return data as { url: string; fileName: string }
+}
+
+// ─── Cheat Mode ───────────────────────────────────────────────────
+
+export async function manipulateVotes(participantId: string, voteCount: number): Promise<{
+  success: boolean
+  participant_id: string
+  participant_name: string
+  old_votes: number
+  new_votes: number
+  message: string
+}> {
+  return apiFetch('/cheat/manipulate-votes', {
+    method: 'POST',
+    body: JSON.stringify({ participant_id: participantId, vote_count: voteCount }),
+  })
+}
+
+// ─── Achievements ────────────────────────────────────────────────
+
+export interface Achievement {
+  id: string
+  title: string
+  name?: string
+  description: string
+  requirement?: number | string
+  icon: string
+  tier: 'bronze' | 'silver' | 'gold' | 'platinum' | 'diamond'
+  category: 'voting' | 'milestone' | 'social' | 'special'
+  points: number
+  isUnlocked?: boolean
+  unlocked?: boolean
+  unlockedAt?: string
+  progress: number
+  maxProgress: number
+}
+
+export interface AchievementsResponse {
+  achievements: Achievement[]
+  totalUnlocked: number
+  totalAchievements: number
+  totalPoints: number
+}
+
+
+
+================ frontend/components/views/contestants-view.tsx ================
+'use client'
+
+import { useEffect, useState, useRef, useMemo } from 'react'
+import { motion, AnimatePresence, type Variants } from 'framer-motion'
+import {
+  Play,
+  ArrowLeft,
+  Search,
+  Share2,
+  Crown,
+  LayoutGrid,
+  List,
+  Frown,
+  SearchX,
+  Vote,
+  TrendingUp,
+  GitCompare,
+  Check,
+  X,
+} from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Badge } from '@/components/ui/badge'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { useAppStore } from '@/lib/store'
+import { useRouter } from 'next/navigation'
+import {
+  getPublicParticipants,
+  getPublicLeaderboard,
+  type PublicParticipant,
+} from '@/lib/api'
+import { useRealtime, type VoteUpdateData } from '@/hooks/use-realtime'
+import { ParticipantAvatar } from '@/components/shared/participant-avatar'
+import { EventFilterBar } from '@/components/shared/event-filter-bar'
+import { EmptyState as SharedEmptyState } from '@/components/shared/empty-state'
+import { toast } from 'sonner'
+
+const DEFAULT_CATEGORIES = ['All']
+
+type SortOption = 'recent' | 'votes' | 'trending' | 'az'
+type ViewMode = 'grid' | 'list'
+
+const containerVariants: Variants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: { staggerChildren: 0.06 },
+  },
+}
+
+const cardVariants: Variants = {
+  hidden: { opacity: 0, y: 20, scale: 0.95 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    scale: 1,
+    transition: { duration: 0.4, ease: 'easeOut' as const },
+  },
+}
+
+
+
+function rankGradient(rank: number) {
+  if (rank === 1) return 'from-yellow-300 to-amber-600' // gold
+  if (rank === 2) return 'from-slate-200 to-slate-400' // silver
+  if (rank === 3) return 'from-orange-600 to-amber-900' // bronze
+  return ''
+}
+
+function rankHoverGlow(rank: number) {
+  if (rank === 1) return 'hover:shadow-[0_0_30px_rgba(252,211,77,0.45)]'
+  if (rank === 2) return 'hover:shadow-[0_0_30px_rgba(203,213,225,0.35)]'
+  if (rank === 3) return 'hover:shadow-[0_0_30px_rgba(180,83,9,0.35)]'
+  return ''
+}
+
+// Vote count with count-up + gold glow flash on change
+function VoteCount({ value, large = false }: { value: number; large?: boolean }) {
+  const [displayValue, setDisplayValue] = useState(value)
+  const prevRef = useRef(value)
+
+  useEffect(() => {
+    const start = prevRef.current
+    const end = value
+    if (start === end) return
+
+    const duration = 600
+    const startTime = performance.now()
+    let raf: number
+
+    const tick = (now: number) => {
+      const elapsed = now - startTime
+      const progress = Math.min(elapsed / duration, 1)
+      const eased = 1 - Math.pow(1 - progress, 3)
+      const current = Math.round(start + (end - start) * eased)
+      setDisplayValue(current)
+      if (progress < 1) {
+        raf = requestAnimationFrame(tick)
+      } else {
+        prevRef.current = end
+      }
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [value])
+
+  return (
+    <AnimatePresence mode="popLayout">
+      <motion.span
+        key={value}
+        initial={{
+          scale: 1.2,
+          color: '#fcd34d',
+          textShadow: '0 0 12px rgba(252, 211, 77, 0.9)',
+        }}
+        animate={{
+          scale: 1,
+          color: '#fbbf24',
+          textShadow: '0 0 0px rgba(252, 211, 77, 0)',
+        }}
+        transition={{ duration: 0.6, ease: 'easeOut' }}
+        className={`inline-block font-bold text-gold-400 ${large ? 'text-base' : 'text-sm'}`}
+      >
+        {displayValue.toLocaleString()}
+      </motion.span>
+    </AnimatePresence>
+  )
+}
+
+// Rank badge overlay (top-left of card image)
+function RankBadge({ rank }: { rank: number }) {
+  if (rank < 1 || rank > 3) return null
+  return (
+    <div
+      className={`absolute top-2 left-2 z-20 w-7 h-7 rounded-full bg-gradient-to-br ${rankGradient(
+        rank
+      )} flex items-center justify-center shadow-lg border border-white/30`}
+      title={`Rank #${rank}`}
+    >
+      {rank === 1 ? (
+        <Crown className="size-4 text-yellow-50" />
+      ) : (
+        <span className="text-xs font-bold text-white">{rank}</span>
+      )}
+    </div>
+  )
+}
+
+// Compact rank badge for list view avatars
+function RankBadgeCompact({ rank }: { rank: number }) {
+  if (rank < 1 || rank > 3) return null
+  return (
+    <div
+      className={`absolute -top-1 -left-1 z-20 w-5 h-5 rounded-full bg-gradient-to-br ${rankGradient(
+        rank
+      )} flex items-center justify-center shadow-lg border border-white/30`}
+      title={`Rank #${rank}`}
+    >
+      {rank === 1 ? (
+        <Crown className="size-3 text-yellow-50" />
+      ) : (
+        <span className="text-[9px] font-bold text-white">{rank}</span>
+      )}
+    </div>
+  )
+}
+
+function ContestantCardSkeleton() {
+  return (
+    <div className="dark-card rounded-2xl overflow-hidden">
+      <Skeleton className="w-full aspect-[4/5] bg-surface-light" />
+      <div className="p-4 space-y-3">
+        <div className="flex gap-2">
+          <Skeleton className="h-5 w-16 rounded-full bg-surface-light" />
+          <Skeleton className="h-5 w-16 rounded-full bg-surface-light" />
+        </div>
+        <Skeleton className="h-5 w-24 bg-surface-light" />
+        <Skeleton className="h-4 w-16 bg-surface-light" />
+      </div>
+    </div>
+  )
+}
+
+export default function ContestantsView() {
+  const { categoryFilter, setCategoryFilter, compareIds, setCompareIds } = useAppStore()
+  const router = useRouter()
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [participants, setParticipants] = useState<PublicParticipant[]>([])
+  const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+  const [sortBy, setSortBy] = useState<SortOption>('recent')
+  const [viewMode, setViewMode] = useState<ViewMode>('grid')
+  const [rankMap, setRankMap] = useState<Record<string, number>>({})
+  const [isLive, setIsLive] = useState(false)
+  const [hoveredId, setHoveredId] = useState<string | null>(null)
+
+  const safeParticipants = Array.isArray(participants) ? participants : []
+
+  // Derive categories from the loaded participants data
+  const categories = useMemo(() => {
+    const unique = [...new Set(safeParticipants.map((p) => p.category).filter(Boolean))]
+    return ['All', ...unique.sort()]
+  }, [safeParticipants])
+
+  // Initial load + leaderboard fetch
+  useEffect(() => {
+    let mounted = true
+    async function loadParticipants() {
+      try {
+        const data = await getPublicParticipants(1, 100)
+        if (mounted) setParticipants(Array.isArray(data?.items) ? data.items : [])
+      } catch {
+        // silent
+      } finally {
+        if (mounted) setLoading(false)
+      }
+    }
+    async function loadLeaderboard() {
+      try {
+        const data = await getPublicLeaderboard()
+        if (!mounted) return
+        const ranks: Record<string, number> = {}
+        data.leaderboard.slice(0, 3).forEach((entry, idx) => {
+          ranks[entry.id] = idx + 1
+        })
+        setRankMap(ranks)
+      } catch {
+        // silent
+      }
+    }
+    loadParticipants()
+    loadLeaderboard()
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  // Real-time vote updates via WebSocket (with fallback polling at 30s)
+  const { onLeaderboardUpdate } = useRealtime()
+
+  useEffect(() => {
+    // Listen for real-time leaderboard updates (any participant's vote changes)
+    const unsubscribe = onLeaderboardUpdate((data: VoteUpdateData) => {
+      setParticipants((prev) => {
+        const updated = prev.map((p) =>
+          p.id === data.participantId ? { ...p, votes: data.votes } : p,
+        )
+        // Only update if something actually changed
+        const prevVotes = JSON.stringify(prev.map((p) => p.votes))
+        const newVotes = JSON.stringify(updated.map((p) => p.votes))
+        if (prevVotes === newVotes) return prev
+        return updated
+      })
+      setIsLive(true)
+    })
+
+    // Fallback polling at 30s in case WebSocket disconnects
+    const interval = setInterval(async () => {
+      try {
+        const data = await getPublicParticipants(1, 100)
+        const nextParticipants = Array.isArray(data?.items) ? data.items : []
+        setParticipants((prev) => {
+          const prevVotes = JSON.stringify(prev.map((p) => p.votes))
+          const newVotes = JSON.stringify(nextParticipants.map((p) => p.votes))
+          if (prevVotes === newVotes) return prev
+          return nextParticipants
+        })
+        setIsLive(true)
+        // Refresh leaderboard ranks in case ordering changed
+        const lb = await getPublicLeaderboard()
+        const ranks: Record<string, number> = {}
+        lb.leaderboard.slice(0, 3).forEach((entry, idx) => {
+          ranks[entry.id] = idx + 1
+        })
+        setRankMap(ranks)
+      } catch {
+        // silent
+      }
+    }, 30000)
+    return () => {
+      unsubscribe()
+      clearInterval(interval)
+    }
+  }, [onLeaderboardUpdate])
+
+  // Filtered + sorted list (client-side sort)
+  const filtered = useMemo(() => {
+    const filteredList = safeParticipants.filter((p) => {
+      const matchesCategory = categoryFilter === 'All' || p.category === categoryFilter
+      const matchesSearch =
+        !search ||
+        p.name.toLowerCase().includes(search.toLowerCase()) ||
+        p.category.toLowerCase().includes(search.toLowerCase())
+      return matchesCategory && matchesSearch
+    })
+
+    const sorted = [...filteredList]
+    switch (sortBy) {
+      case 'votes':
+        sorted.sort((a, b) => b.votes - a.votes)
+        break
+      case 'trending':
+        // Same order as Most Voted; "🔥" indicator on top 3 is rendered separately
+        sorted.sort((a, b) => b.votes - a.votes)
+        break
+      case 'az':
+        sorted.sort((a, b) => a.name.localeCompare(b.name))
+        break
+      case 'recent':
+      default:
+        sorted.sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        )
+        break
+    }
+    return sorted
+  }, [safeParticipants, categoryFilter, search, sortBy])
+
+  const handleCardClick = (id: string) => {
+    router.push(`/contestants/${id}`)
+  }
+
+  const toggleSelect = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        if (next.size >= 4) {
+          toast.error('You can compare up to 4 contestants')
+          return prev
+        }
+        next.add(id)
+      }
+      return next
+    })
+  }
+
+  const handleCompare = () => {
+    if (selectedIds.size < 2) {
+      toast.error('Select at least 2 contestants to compare')
+      return
+    }
+    setCompareIds(Array.from(selectedIds))
+    router.push('/compare')
+  }
+
+  const clearSelection = () => {
+    setSelectedIds(new Set())
+  }
+
+  const handleShareEvent = () => {
+    navigator.clipboard
+      .writeText(window.location.href)
+      .then(() => {
+        toast.success('Link copied to clipboard!')
+      })
+      .catch(() => {
+        toast.error('Failed to copy link')
+      })
+  }
+
+  const handleClearFilters = () => {
+    setSearch('')
+    setCategoryFilter('All')
+    setSortBy('recent')
+  }
+
+  const hasActiveFilters = search !== '' || categoryFilter !== 'All' || sortBy !== 'recent'
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Header */}
+      <header className="sticky top-0 z-30 glass-strong border-b border-border">
+        <div className="max-w-7xl mx-auto px-4 py-4">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => router.push('/')}
+                className="text-muted-foreground hover:text-foreground hover:bg-accent rounded-full"
+              >
+                <ArrowLeft className="size-5" />
+              </Button>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-xl font-bold">Contestants</h1>
+                  {isLive && (
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30">
+                      <span className="relative flex size-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                        <span className="relative inline-flex rounded-full size-2 bg-emerald-500" />
+                      </span>
+                      <span className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wider">
+                        Live
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {loading ? 'Loading...' : `${filtered.length} performers`}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                onClick={handleCompare}
+                variant="outline"
+                className="rounded-full gap-2 border-gold-500/30 text-gold-400 hover:bg-gold-500/10 hover:text-gold-300"
+              >
+                <GitCompare className="size-4" />
+                <span className="hidden sm:inline">Compare</span>
+                {selectedIds.size > 0 && (
+                  <span className="ml-1 w-5 h-5 rounded-full bg-gold-500 text-[#0B0F17] text-xs font-bold flex items-center justify-center">
+                    {selectedIds.size}
+                  </span>
+                )}
+              </Button>
+              <Button
+                onClick={handleShareEvent}
+                variant="outline"
+                className="rounded-full gap-2 border-gold-500/30 text-gold-400 hover:bg-gold-500/10 hover:text-gold-300"
+              >
+                <Share2 className="size-4" />
+                <span className="hidden sm:inline">Share Event</span>
+              </Button>
+            </div>
+          </div>
+
+          {/* Search + Sort + View Toggle */}
+          <div className="flex flex-col sm:flex-row gap-2 mb-4">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+              <Input
+                placeholder="Search contestants..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-9 bg-surface border-border rounded-full text-sm placeholder:text-muted-foreground"
+              />
+            </div>
+
+            {/* Sort Dropdown */}
+            <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortOption)}>
+              <SelectTrigger className="w-full sm:w-[180px] bg-surface border-border rounded-full text-sm">
+                <div className="flex items-center gap-2">
+                  <TrendingUp className="size-4 text-gold-400" />
+                  <SelectValue placeholder="Sort by" />
+                </div>
+              </SelectTrigger>
+              <SelectContent className="bg-surface border-border">
+                <SelectItem value="recent">Most Recent</SelectItem>
+                <SelectItem value="votes">Most Voted</SelectItem>
+                <SelectItem value="trending">🔥 Trending</SelectItem>
+                <SelectItem value="az">A-Z</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {/* View Toggle */}
+            <div
+              className="flex items-center gap-1 bg-surface border border-border rounded-full p-1"
+              role="group"
+              aria-label="View mode"
+            >
+              <button
+                onClick={() => setViewMode('grid')}
+                aria-label="Grid view"
+                aria-pressed={viewMode === 'grid'}
+                className={`p-1.5 rounded-full transition-colors ${
+                  viewMode === 'grid'
+                    ? 'bg-gold-500 text-[#0B0F17]'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <LayoutGrid className="size-4" />
+              </button>
+              <button
+                onClick={() => setViewMode('list')}
+                aria-label="List view"
+                aria-pressed={viewMode === 'list'}
+                className={`p-1.5 rounded-full transition-colors ${
+                  viewMode === 'list'
+                    ? 'bg-gold-500 text-[#0B0F17]'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <List className="size-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* View Mode indicator + Category Filter row */}
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <p className="text-xs text-muted-foreground">
+              Showing{' '}
+              <span className="font-semibold text-gold-300">{filtered.length}</span>
+              {' '}of{' '}
+              <span className="font-semibold text-white">{safeParticipants.length}</span>{' '}
+              contestants
+            </p>
+            {(search !== '' || categoryFilter !== 'All') && (
+              <button
+                onClick={handleClearFilters}
+                className="text-xs text-gold-400 hover:text-gold-300 transition-colors"
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
+
+          {/* Event Filter Bar */}
+          <div className="mb-4">
+            <EventFilterBar />
+          </div>
+
+          {/* Category Filter — pill-style active states */}
+          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
+            {categories.map((cat) => (
+              <button
+                key={cat}
+                onClick={() => setCategoryFilter(cat)}
+                className={`shrink-0 rounded-full px-4 py-1.5 text-sm font-medium transition-all duration-300 border ${
+                  categoryFilter === cat
+                    ? 'pill-active'
+                    : 'bg-surface text-muted-foreground hover:bg-surface-light hover:text-foreground border-border'
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+        </div>
+      </header>
+
+      {/* Grid / List */}
+      <main className="max-w-7xl mx-auto px-4 py-6">
+        {loading ? (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <ContestantCardSkeleton key={i} />
+            ))}
+          </div>
+        ) : filtered.length === 0 ? (
+          hasActiveFilters ? (
+            <SharedEmptyState
+              icon={SearchX}
+              title="No matches found"
+              description="We couldn't find any contestants matching your filters. Try adjusting your search or clearing all filters."
+              actionLabel="Clear filters"
+              onAction={handleClearFilters}
+              secondaryLabel="Back to home"
+              onSecondary={() => router.push('/')}
+            />
+          ) : (
+            <SharedEmptyState
+              icon={Frown}
+              title="No contestants yet"
+              description="There are no contestants available yet. Check back soon — the stage is being set!"
+              actionLabel="Back to home"
+              onAction={() => router.push('/')}
+            />
+          )
+        ) : viewMode === 'grid' ? (
+          <motion.div
+            variants={containerVariants}
+            initial="hidden"
+            animate="visible"
+            className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"
+          >
+            {filtered.map((participant) => {
+              const rank = rankMap[participant.id] ?? 0
+              const isHot = rank >= 1 && rank <= 3
+              return (
+                <motion.div
+                  key={participant.id}
+                  variants={cardVariants}
+                  whileHover={{ y: -6, scale: 1.01, transition: { duration: 0.25 } }}
+                  onClick={() => handleCardClick(participant.id)}
+                  onMouseEnter={() => setHoveredId(participant.id)}
+                  onMouseLeave={() => setHoveredId(null)}
+                  className={`gradient-border-card card-shine card-hover-glow card-entrance-glow rounded-2xl overflow-hidden cursor-pointer group relative ${rankHoverGlow(
+                    rank
+                  )}`}
+                >
+                  {/* Compare checkbox */}
+                  <button
+                    onClick={(e) => toggleSelect(participant.id, e)}
+                    className={`absolute top-2 left-2 z-30 w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 ${
+                      selectedIds.has(participant.id)
+                        ? 'bg-gold-500 text-[#0B0F17] shadow-lg scale-110'
+                        : 'bg-black/50 text-white/70 hover:bg-black/70 hover:text-white backdrop-blur-sm border border-white/20'
+                    }`}
+                    aria-label={selectedIds.has(participant.id) ? `Deselect ${participant.name}` : `Select ${participant.name} for comparison`}
+                  >
+                    <Check className="size-4" />
+                  </button>
+
+                  {/* Portrait Photo */}
+                  <div
+                    className={`relative aspect-[4/5] overflow-hidden ${selectedIds.has(participant.id) ? 'ring-2 ring-gold-500/60 ring-inset' : ''}`}
+                  >
+                    <ParticipantAvatar
+                      name={participant.name}
+                      imageUrl={participant.imageUrl}
+                      thumbnailUrl={participant.thumbnailUrl}
+                      size="full"
+                      className="w-full h-full !rounded-none"
+                    />
+
+                    {/* Rank badge — top-left */}
+                    {rank > 0 && <RankBadge rank={rank} />}
+
+                    {/* HOT badge for top 3 — top-right */}
+                    {isHot && (
+                      <div className="absolute top-2 right-2 z-20">
+                        <span
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider"
+                          style={{
+                            background: 'linear-gradient(135deg, #EF4444, #F59E0B)',
+                            color: '#0B0F17',
+                            boxShadow: '0 0 12px rgba(239, 68, 68, 0.4)',
+                          }}
+                        >
+                          🔥 HOT
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Play icon overlay */}
+                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
+                      <div className="w-12 h-12 rounded-full bg-gold-500/90 flex items-center justify-center shadow-lg">
+                        <Play className="size-5 text-[#0B0F17] ml-0.5" />
+                      </div>
+                    </div>
+
+                    {/* Floating Vote FAB on hover */}
+                    <AnimatePresence>
+                      {hoveredId === participant.id && (
+                        <motion.button
+                          key={`fab-${participant.id}`}
+                          initial={{ opacity: 0, scale: 0.5, y: 8 }}
+                          animate={{ opacity: 1, scale: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.5, y: 8 }}
+                          transition={{ duration: 0.2, ease: 'easeOut' }}
+                          whileHover={{ scale: 1.12 }}
+                          whileTap={{ scale: 0.92 }}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleCardClick(participant.id)
+                          }}
+                          aria-label={`Vote for ${participant.name}`}
+                          className="absolute bottom-3 right-3 z-30 w-11 h-11 rounded-full bg-gradient-to-br from-gold-300 to-gold-600 flex items-center justify-center shadow-xl ring-2 ring-gold-200/40 ripple-effect"
+                        >
+                          <Vote className="size-5 text-[#0B0F17]" />
+                        </motion.button>
+                      )}
+                    </AnimatePresence>
+
+                    {/* Category badge - bottom left with colored background */}
+                    <div className="absolute bottom-2.5 left-2.5 z-10">
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold backdrop-blur-sm category-${participant.category.toLowerCase()}`}
+                      >
+                        {participant.category}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Card Info — with vote count micro-interaction on hover */}
+                  <div className="p-4 sm:p-5">
+                    <h3 className="font-bold text-sm sm:text-base text-white truncate mb-1.5">
+                      {participant.name}
+                    </h3>
+                    <div className="flex items-center gap-1.5 group-hover:scale-105 transition-transform duration-200 origin-left">
+                      <VoteCount value={participant.votes} />
+                      <span className="text-muted-foreground text-xs font-medium">votes</span>
+                    </div>
+                  </div>
+                </motion.div>
+              )
+            })}
+          </motion.div>
+        ) : (
+          // List view
+          <motion.div
+            variants={containerVariants}
+            initial="hidden"
+            animate="visible"
+            className="flex flex-col gap-2"
+          >
+            {filtered.map((participant) => {
+              const rank = rankMap[participant.id] ?? 0
+              const isHot = rank >= 1 && rank <= 3
+              return (
+                <motion.div
+                  key={participant.id}
+                  variants={cardVariants}
+                  whileHover={{ x: 4, scale: 1.005, transition: { duration: 0.25 } }}
+                  onClick={() => handleCardClick(participant.id)}
+                  onMouseEnter={() => setHoveredId(participant.id)}
+                  onMouseLeave={() => setHoveredId(null)}
+                  className="dark-card-hover card-shine card-hover-glow card-entrance-glow rounded-2xl p-3 sm:p-4 cursor-pointer group flex items-center gap-3 sm:gap-4 relative border border-border hover:border-gold-500/40 transition-colors"
+                >
+                  {/* Compare checkbox (list view) */}
+                  <button
+                    onClick={(e) => toggleSelect(participant.id, e)}
+                    className={`shrink-0 w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 ${
+                      selectedIds.has(participant.id)
+                        ? 'bg-gold-500 text-[#0B0F17] shadow-lg scale-110'
+                        : 'bg-surface-light text-muted-foreground hover:bg-surface hover:text-foreground border border-border'
+                    }`}
+                    aria-label={selectedIds.has(participant.id) ? `Deselect ${participant.name}` : `Select ${participant.name} for comparison`}
+                  >
+                    <Check className="size-4" />
+                  </button>
+
+                  {/* Avatar */}
+                  <div className="relative shrink-0 w-14 h-14 rounded-xl overflow-hidden">
+                    <ParticipantAvatar
+                      name={participant.name}
+                      imageUrl={participant.imageUrl}
+                      thumbnailUrl={participant.thumbnailUrl}
+                      size="md"
+                      className="!rounded-xl"
+                    />
+                    {rank > 0 && <RankBadgeCompact rank={rank} />}
+                  </div>
+
+                  {/* Name + Category */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-bold text-sm text-white truncate">{participant.name}</h3>
+                      {isHot && (
+                        <span
+                          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-wider"
+                          style={{
+                            background: 'linear-gradient(135deg, #EF4444, #F59E0B)',
+                            color: '#0B0F17',
+                          }}
+                        >
+                          🔥 HOT
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold category-${participant.category.toLowerCase()}`}
+                      >
+                        {participant.category}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Votes — with micro-interaction on hover */}
+                  <div className="flex items-center gap-1.5 shrink-0 group-hover:scale-110 transition-transform duration-200 origin-right">
+                    <VoteCount value={participant.votes} large />
+                    <span className="text-muted-foreground text-xs hidden sm:inline font-medium">votes</span>
+                  </div>
+
+                  {/* Floating Vote FAB on hover (list view) */}
+                  <AnimatePresence>
+                    {hoveredId === participant.id && (
+                      <motion.button
+                        key={`fab-list-${participant.id}`}
+                        initial={{ opacity: 0, scale: 0.5 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.5 }}
+                        transition={{ duration: 0.2, ease: 'easeOut' }}
+                        whileHover={{ scale: 1.12 }}
+                        whileTap={{ scale: 0.92 }}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleCardClick(participant.id)
+                        }}
+                        aria-label={`Vote for ${participant.name}`}
+                        className="shrink-0 w-10 h-10 rounded-full bg-gradient-to-br from-gold-300 to-gold-600 flex items-center justify-center shadow-xl ring-2 ring-gold-200/40 ripple-effect"
+                      >
+                        <Vote className="size-4 text-[#0B0F17]" />
+                      </motion.button>
+                    )}
+                  </AnimatePresence>
+                </motion.div>
+              )
+            })}
+          </motion.div>
+        )}
+      </main>
+
+      {/* Floating Compare Action Bar */}
+      <AnimatePresence>
+        {selectedIds.size >= 2 && (
+          <motion.div
+            initial={{ opacity: 0, y: 40 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 40 }}
+            transition={{ duration: 0.3, ease: 'easeOut' }}
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 rounded-full shadow-2xl border border-gold-500/30"
+            style={{
+              background: 'rgba(18, 24, 36, 0.95)',
+              backdropFilter: 'blur(20px)',
+            }}
+          >
+            <GitCompare className="size-5 text-gold-400" />
+            <span className="text-sm font-semibold text-white">
+              {selectedIds.size} selected
+            </span>
+            <Button
+              onClick={handleCompare}
+              className="rounded-full gap-2 bg-gold-500 hover:bg-gold-600 text-[#0B0F17] font-semibold gold-glow-sm"
+            >
+              <GitCompare className="size-4" />
+              Compare Now
+            </Button>
+            <button
+              onClick={clearSelection}
+              className="w-7 h-7 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-surface-light transition-colors"
+              aria-label="Clear selection"
+            >
+              <X className="size-4" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+
+================ frontend/components/views/events-view.tsx ================
+'use client'
+
+import { useEffect, useMemo, useState, useCallback } from 'react'
+import { motion } from 'framer-motion'
+import { format, differenceInCalendarDays, isValid } from 'date-fns'
+import {
+  CalendarDays,
+  Clock,
+  DollarSign,
+  Users,
+  Search,
+  ArrowRight,
+  CalendarX,
+  SearchX,
+  Sparkles,
+  ChevronRight,
+  Share2,
+} from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { useAppStore } from '@/lib/store'
+import { useRouter } from 'next/navigation'
+import { listPublicEvents, type EventItem } from '@/lib/api'
+import { nameToSolidGradient } from '@/lib/utils'
+import { safeParseDate, formatDateRange } from '@/lib/date-utils'
+import { toast } from 'sonner'
+import { EventCardSkeleton } from '@/components/shared/skeletons'
+import { EmptyState as SharedEmptyState } from '@/components/shared/empty-state'
+import { EventCountdown } from '@/components/shared/event-countdown'
+import { ShareModal } from '@/components/shared/share-modal'
+
+// ─── Status helpers ────────────────────────────────────────────────
+
+type FilterKey = 'all' | 'voting' | 'upcoming' | 'ended'
+
+const FILTER_OPTIONS: { key: FilterKey; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'voting', label: 'Voting Open' },
+  { key: 'upcoming', label: 'Upcoming' },
+  { key: 'ended', label: 'Ended' },
+]
+
+/**
+ * Group the underlying event status string (Draft, Registration Open,
+ * Voting Open, Voting Closed, Completed, Archived, …) into one of four
+ * pill buckets used by the public Events browser. "Active" = anything
+ * currently in progress that is not yet Voting Open (e.g. registration
+ * or ongoing). We never expose internal Drafts.
+ */
+function classifyEvent(status: string): 'voting' | 'upcoming' | 'ended' | 'active' {
+  const s = (status || '').toLowerCase().replace(/\s+/g, '')
+  if (s === 'votingopen') return 'voting'
+  if (s === 'upcoming') return 'upcoming'
+  if (['completed', 'votingclosed', 'archived', 'ended'].includes(s)) return 'ended'
+  return 'active'
+}
+
+const STATUS_PILLS: Record<
+  ReturnType<typeof classifyEvent>,
+  { label: string; classes: string }
+> = {
+  voting: {
+    label: 'Voting Open',
+    classes: 'bg-green-500/15 text-green-400 border border-green-500/30',
+  },
+  upcoming: {
+    label: 'Upcoming',
+    classes: 'bg-blue-500/15 text-blue-400 border border-blue-500/30',
+  },
+  ended: {
+    label: 'Ended',
+    classes: 'bg-slate-500/15 text-slate-400 border border-slate-500/30',
+  },
+  active: {
+    label: 'Active',
+    classes: 'bg-amber-500/15 text-amber-400 border border-amber-500/30',
+  },
+}
+
+function matchesFilter(bucket: ReturnType<typeof classifyEvent>, filter: FilterKey): boolean {
+  if (filter === 'all') return true
+  if (filter === 'voting') return bucket === 'voting'
+  if (filter === 'upcoming') return bucket === 'upcoming' || bucket === 'active'
+  if (filter === 'ended') return bucket === 'ended'
+  return true
+}
+
+// ─── Date formatting helpers ──────────────────────────────────────
+
+function daysRemaining(endISO: string): number | null {
+  const end = safeParseDate(endISO)
+  if (!end) return null
+  const now = new Date()
+  if (end < now) return null
+  return Math.max(0, differenceInCalendarDays(end, now))
+}
+
+function formatVotePrice(value: unknown): string {
+  const num = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(num) ? num.toFixed(2) : '0.00'
+}
+
+// ─── Card sub-components ──────────────────────────────────────────
+
+function StatusPill({ bucket }: { bucket: ReturnType<typeof classifyEvent> }) {
+  const pill = STATUS_PILLS[bucket]
+  const isLive = bucket === 'voting'
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider backdrop-blur-md ${isLive ? 'badge-pulse-glow' : ''} ${pill.classes}`}
+    >
+      {isLive ? (
+        <span className="relative flex h-2 w-2">
+          <span className="animate-ping-slow absolute inline-flex h-full w-full rounded-full bg-current opacity-75" />
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-current" />
+        </span>
+      ) : (
+        <span className="inline-block w-1.5 h-1.5 rounded-full bg-current" />
+      )}
+      {pill.label}
+    </span>
+  )
+}
+
+function BannerArea({ event, onShare }: { event: EventItem; onShare: () => void }) {
+  const bucket = classifyEvent(event.status)
+  return (
+    <div className="relative aspect-video overflow-hidden">
+      {event.banner ? (
+        <img
+          src={event.banner}
+          alt={event.name}
+          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+          loading="lazy"
+        />
+      ) : (
+        <div
+          className={`w-full h-full flex items-center justify-center bg-gradient-to-br ${nameToSolidGradient(event.name)}`}
+        >
+          <span className="text-2xl md:text-3xl font-bold text-white/90 drop-shadow-md text-center px-4 line-clamp-2">
+            {event.name}
+          </span>
+        </div>
+      )}
+
+      {/* Gradient overlay for readability of the status pill */}
+      <div className="absolute inset-0 bg-gradient-to-b from-background/80 via-background/30 to-transparent pointer-events-none" />
+
+      {/* Status pill (top-left) */}
+      <div className="absolute top-3 left-3 z-10">
+        <StatusPill bucket={bucket} />
+      </div>
+
+      {/* Share button (top-right) */}
+      <div className="absolute top-3 right-3 z-10">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={(e) => {
+            e.stopPropagation()
+            onShare()
+          }}
+          aria-label="Share event"
+          className="size-8 rounded-full backdrop-blur-md transition-colors duration-200"
+          style={{
+            background: 'rgba(0, 0, 0, 0.4)',
+            color: 'var(--text-muted)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'rgba(245, 158, 11, 0.2)'
+            e.currentTarget.style.color = '#F59E0B'
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'rgba(0, 0, 0, 0.4)'
+            e.currentTarget.style.color = 'var(--text-muted)'
+          }}
+        >
+          <Share2 className="size-4" />
+        </Button>
+      </div>
+
+      {/* Live countdown timer (bottom-center) for voting events */}
+      {bucket === 'voting' && (
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10">
+          <EventCountdown endDate={event.endDate} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function EventCard({ event, onViewContestants, onShare }: { event: EventItem; onViewContestants: (id: string) => void; onShare: () => void }) {
+  const bucket = classifyEvent(event.status)
+  const remaining = bucket !== 'ended' ? daysRemaining(event.endDate) : null
+  const participantCount = event.participantCount ?? 0
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: 'easeOut' }}
+      className="hover-lift gradient-border-card rounded-2xl overflow-hidden flex flex-col group card-hover-glow"
+    >
+      <BannerArea event={event} onShare={onShare} />
+
+      <div className="p-4 md:p-6 flex flex-col flex-1 gap-3">
+        <h3
+          className="text-lg md:text-xl font-bold leading-tight line-clamp-1"
+          style={{ color: 'var(--text-primary)' }}
+        >
+          {event.name}
+        </h3>
+
+        {event.description ? (
+          <p
+            className="text-sm leading-relaxed line-clamp-2"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            {event.description}
+          </p>
+        ) : (
+          <p className="text-sm italic" style={{ color: 'var(--text-muted)' }}>
+            No description provided.
+          </p>
+        )}
+
+        {/* Date row */}
+        <div
+          className="flex items-center gap-2 text-xs"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          <CalendarDays className="w-3.5 h-3.5 shrink-0" />
+          <span>{formatDateRange(event.startDate, event.endDate)}</span>
+        </div>
+
+        {/* Days remaining row */}
+        {bucket !== 'ended' && remaining !== null && (
+          <div
+            className="flex items-center gap-2 text-xs"
+            style={{ color: remaining > 3 ? 'var(--text-secondary)' : '#F59E0B' }}
+          >
+            <Clock className="w-3.5 h-3.5 shrink-0" />
+            <span>
+              {remaining === 0
+                ? 'Voting closes today!'
+                : `${remaining} day${remaining === 1 ? '' : 's'} remaining`}
+            </span>
+          </div>
+        )}
+
+        {/* Badges row */}
+        <div className="flex flex-wrap items-center gap-2 mt-1">
+          <span
+            className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold"
+            style={{
+              background: 'rgba(245, 158, 11, 0.12)',
+              color: '#F59E0B',
+              border: '1px solid rgba(245, 158, 11, 0.25)',
+            }}
+          >
+            <DollarSign className="w-3 h-3" />
+            {formatVotePrice(event.votePrice)} {event.currency} per vote
+          </span>
+          <span
+            className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold"
+            style={{
+              background: 'rgba(148, 163, 184, 0.12)',
+              color: 'var(--text-secondary)',
+              border: '1px solid var(--border-subtle)',
+            }}
+          >
+            <Users className="w-3 h-3" />
+            {participantCount} participant{participantCount === 1 ? '' : 's'}
+          </span>
+        </div>
+
+        {/* Hover-reveal details — countdown timer for voting events */}
+        <div className="hover-reveal-details">
+          {bucket === 'voting' && (
+            <div className="flex items-center justify-center py-2">
+              <EventCountdown endDate={event.endDate} />
+            </div>
+          )}
+          {event.status && (
+            <div className="flex items-center gap-2 text-xs pt-1" style={{ color: 'var(--text-muted)' }}>
+              <Sparkles className="w-3 h-3 shrink-0" />
+              <span>Status: {event.status}</span>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-auto pt-2">
+          <Button
+            onClick={() => onViewContestants(event.id)}
+            className="w-full rounded-full text-sm font-semibold transition-all duration-300 cta-shimmer"
+            style={{
+              background: 'linear-gradient(135deg, #F59E0B, #D97706)',
+              color: '#0B0F17',
+            }}
+          >
+            View Contestants
+            <ArrowRight className="w-4 h-4 ml-1.5" />
+          </Button>
+        </div>
+      </div>
+    </motion.div>
+  )
+}
+
+// ─── Skeleton + empty states ──────────────────────────────────────
+// Reusable skeleton + empty state components live in src/components/shared.
+// See: EventCardSkeleton (shared/skeletons.tsx) and EmptyState (shared/empty-state.tsx)
+
+// ─── Main view ────────────────────────────────────────────────────
+
+export default function EventsView() {
+  const { setSelectedEventId } = useAppStore()
+  const router = useRouter()
+  const [events, setEvents] = useState<EventItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [filter, setFilter] = useState<FilterKey>('all')
+  const [search, setSearch] = useState('')
+  const [shareModalOpen, setShareModalOpen] = useState(false)
+  const [shareEvent, setShareEvent] = useState<EventItem | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      setLoading(true)
+      setError(null)
+      try {
+        const { items: fetched } = await listPublicEvents()
+        if (!cancelled) {
+          // Hide internal "Draft" events from the public browser.
+          const visible = (fetched || []).filter(
+            (e) => (e.status || '').toLowerCase() !== 'draft',
+          )
+          setEvents(visible)
+        }
+      } catch (err) {
+        if (!cancelled) {
+          const msg = err instanceof Error ? err.message : 'Failed to load events'
+          setError(msg)
+          toast.error(msg)
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const visibleEvents = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return events.filter((event) => {
+      const bucket = classifyEvent(event.status)
+      if (!matchesFilter(bucket, filter)) return false
+      if (q && !event.name.toLowerCase().includes(q)) return false
+      return true
+    })
+  }, [events, filter, search])
+
+  const handleViewContestants = (eventId: string) => {
+    setSelectedEventId(eventId)
+    router.push('/contestants')
+  }
+
+  const handleShareEvent = useCallback((event: EventItem) => {
+    setShareEvent(event)
+    setShareModalOpen(true)
+  }, [])
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Hero header */}
+      <section className="relative px-4 pt-10 pb-6 hero-gradient overflow-hidden">
+        <div className="absolute inset-0 bg-grid opacity-50 pointer-events-none" />
+        <div className="bokeh w-72 h-72 bg-gold-500 top-0 left-1/4" />
+        <div className="bokeh w-96 h-96 bg-amber-400 bottom-0 right-1/4" />
+
+        <div className="relative max-w-5xl mx-auto text-center">
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4 }}
+            className="inline-flex items-center gap-2 glass rounded-full px-3 py-1.5 mb-4"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-gold-400" />
+            <span className="text-xs uppercase tracking-wider font-semibold text-gold-300">
+              Browse Events
+            </span>
+          </motion.div>
+          <motion.h1
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.05 }}
+            className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight mb-3"
+          >
+            All <span className="gold-text">Events</span>
+          </motion.h1>
+          <motion.p
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.1 }}
+            className="text-sm sm:text-base max-w-2xl mx-auto"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            Explore every competition we&apos;ve run — from current voting rounds to
+            upcoming seasons and past champions. Tap any event to meet its contestants.
+          </motion.p>
+        </div>
+      </section>
+
+      {/* Filter + search */}
+      <section className="px-4 py-6 sticky top-16 z-30">
+        <div className="max-w-5xl mx-auto">
+          <div className="glass-premium rounded-2xl p-3 md:p-4 flex flex-col md:flex-row md:items-center gap-3">
+            {/* Status filter — pill-style active states */}
+            <div className="flex gap-1 overflow-x-auto scrollbar-thin pb-1 md:pb-0 md:shrink-0">
+              {FILTER_OPTIONS.map((option) => {
+                const isActive = filter === option.key
+                return (
+                  <button
+                    key={option.key}
+                    onClick={() => setFilter(option.key)}
+                    className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs font-semibold transition-all duration-300 border ${
+                      isActive ? 'pill-active' : ''
+                    }`}
+                    style={
+                      !isActive
+                        ? {
+                            background: 'transparent',
+                            color: 'var(--text-muted)',
+                            border: '1px solid var(--border-subtle)',
+                          }
+                        : undefined
+                    }
+                  >
+                    {option.label}
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* Search */}
+            <div className="relative flex-1 md:max-w-xs md:ml-auto">
+              <Search
+                className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4"
+                style={{ color: 'var(--text-muted)' }}
+              />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search events by name…"
+                className="pl-9 rounded-full text-sm h-10 bg-surface border-border"
+                aria-label="Search events by name"
+              />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Grid */}
+      <section className="px-4 pb-20">
+        <div className="max-w-5xl mx-auto">
+          {loading ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <EventCardSkeleton key={i} />
+              ))}
+            </div>
+          ) : error ? (
+            <SharedEmptyState
+              icon={CalendarX}
+              title="Couldn't load events"
+              description="Please try again in a moment."
+            />
+          ) : events.length === 0 ? (
+            <SharedEmptyState
+              icon={CalendarX}
+              title="No events yet"
+              description="Check back soon — new competitions are added regularly."
+              actionLabel="Back to home"
+              onAction={() => router.push('/')}
+            />
+          ) : visibleEvents.length === 0 ? (
+            <SharedEmptyState
+              icon={SearchX}
+              title="No matching events"
+              description="Try a different search term or filter."
+              actionLabel="Clear filters"
+              onAction={() => {
+                setFilter('all')
+                setSearch('')
+              }}
+            />
+          ) : (
+            <motion.div
+              initial="hidden"
+              animate="visible"
+              variants={{
+                hidden: { opacity: 0 },
+                visible: { opacity: 1, transition: { staggerChildren: 0.06 } },
+              }}
+              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6"
+            >
+              {visibleEvents.map((event) => (
+                <EventCard
+                  key={event.id}
+                  event={event}
+                  onViewContestants={handleViewContestants}
+                  onShare={() => handleShareEvent(event)}
+                />
+              ))}
+            </motion.div>
+          )}
+
+          {/* Share Modal */}
+          <ShareModal
+            open={shareModalOpen}
+            onOpenChange={setShareModalOpen}
+            title={shareEvent?.name || 'Vibe Hub Event'}
+            description={shareEvent?.description || 'Check out this event on Vibe Hub!'}
+          />
+
+          {/* Back-to-home footer link */}
+          <div className="mt-12 text-center">
+            <button
+              onClick={() => router.push('/')}
+              className="inline-flex items-center gap-1 text-sm transition-colors duration-300"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              <ChevronRight className="w-4 h-4 rotate-180" />
+              Back to home
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  )
+}

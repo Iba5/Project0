@@ -41,17 +41,24 @@ const FILTER_OPTIONS: { key: FilterKey; label: string }[] = [
 ]
 
 /**
- * Group the underlying event status string (Draft, Registration Open,
- * Voting Open, Voting Closed, Completed, Archived, …) into one of four
- * pill buckets used by the public Events browser. "Active" = anything
+ * Group the backend's computed_status string (see event_utils.py:
+ * get_computed_event_status — lowercase snake_case values like
+ * "voting_open", "upcoming", "completed", "registration_open") into one of
+ * four pill buckets used by the public Events browser. "Active" = anything
  * currently in progress that is not yet Voting Open (e.g. registration
  * or ongoing). We never expose internal Drafts.
+ *
+ * NOTE: this must read event.computedStatus, not event.status — `status`
+ * is the admin lifecycle field (Draft/Published/Archived) and is always
+ * "Published" for anything visible here, so matching against it here
+ * previously meant every event fell through to "active" regardless of
+ * its real voting state.
  */
-function classifyEvent(status: string): 'voting' | 'upcoming' | 'ended' | 'active' {
-  const s = (status || '').toLowerCase().replace(/\s+/g, '')
-  if (s === 'votingopen') return 'voting'
+function classifyEvent(computedStatus: string | undefined): 'voting' | 'upcoming' | 'ended' | 'active' {
+  const s = (computedStatus || '').toLowerCase()
+  if (s === 'voting_open') return 'voting'
   if (s === 'upcoming') return 'upcoming'
-  if (['completed', 'votingclosed', 'archived', 'ended'].includes(s)) return 'ended'
+  if (['completed', 'voting_closed', 'archived', 'cancelled'].includes(s)) return 'ended'
   return 'active'
 }
 
@@ -123,7 +130,7 @@ function StatusPill({ bucket }: { bucket: ReturnType<typeof classifyEvent> }) {
 }
 
 function BannerArea({ event, onShare }: { event: EventItem; onShare: () => void }) {
-  const bucket = classifyEvent(event.status)
+  const bucket = classifyEvent(event.computedStatus)
   return (
     <div className="relative aspect-video overflow-hidden">
       {event.banner ? (
@@ -191,7 +198,7 @@ function BannerArea({ event, onShare }: { event: EventItem; onShare: () => void 
 }
 
 function EventCard({ event, onViewContestants, onShare }: { event: EventItem; onViewContestants: (id: string) => void; onShare: () => void }) {
-  const bucket = classifyEvent(event.status)
+  const bucket = classifyEvent(event.computedStatus)
   const remaining = bucket !== 'ended' ? daysRemaining(event.endDate) : null
   const participantCount = event.participantCount ?? 0
 
@@ -358,7 +365,7 @@ export default function EventsView() {
   const visibleEvents = useMemo(() => {
     const q = search.trim().toLowerCase()
     return events.filter((event) => {
-      const bucket = classifyEvent(event.status)
+      const bucket = classifyEvent(event.computedStatus)
       if (!matchesFilter(bucket, filter)) return false
       if (q && !event.name.toLowerCase().includes(q)) return false
       return true
@@ -367,7 +374,7 @@ export default function EventsView() {
 
   const handleViewContestants = (eventId: string) => {
     setSelectedEventId(eventId)
-    router.push('/contestants')
+    router.push(`/contestants?event=${eventId}`)
   }
 
   const handleShareEvent = useCallback((event: EventItem) => {

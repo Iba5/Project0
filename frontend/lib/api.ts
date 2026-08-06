@@ -305,24 +305,25 @@ export interface ListParticipantsParams {
   search?: string
   status?: string
   eventId?: string
-  category?: string
 }
 
 export async function listParticipants(params?: ListParticipantsParams): Promise<{ items: ParticipantItem[]; pagination: PaginationInfo }> {
   const searchParams = new URLSearchParams()
   if (params?.search) searchParams.set('search', params.search)
   if (params?.status) searchParams.set('status', params.status)
-  if (params?.eventId) searchParams.set('eventId', params.eventId)
-  if (params?.category) searchParams.set('category', params.category)
+  // Backend query param is snake_case `event_id`; there is no `category`
+  // param on this admin route, so it isn't accepted here.
+  if (params?.eventId) searchParams.set('event_id', params.eventId)
   const qs = searchParams.toString()
   return apiFetch(`/participants${qs ? `?${qs}` : ''}`)
 }
 
-export async function listPublicParticipants(params?: ListParticipantsParams): Promise<{ items: ParticipantItem[]; pagination: PaginationInfo }> {
+export async function listPublicParticipants(params?: Pick<ListParticipantsParams, 'search' | 'eventId'>): Promise<{ items: ParticipantItem[]; pagination: PaginationInfo }> {
   const searchParams = new URLSearchParams()
   if (params?.search) searchParams.set('search', params.search)
-  if (params?.eventId) searchParams.set('eventId', params.eventId)
-  if (params?.category) searchParams.set('category', params.category)
+  // Backend query param is snake_case `event_id`; there is no `category`
+  // param on this public route either.
+  if (params?.eventId) searchParams.set('event_id', params.eventId)
   const qs = searchParams.toString()
   return apiFetch(`/participants/public${qs ? `?${qs}` : ''}`)
 }
@@ -455,10 +456,6 @@ export async function getPublicEventParticipants(eventId: string): Promise<{ par
   return apiFetch(`/public/events/${eventId}/participants`)
 }
 
-export async function getPublicParticipant(participantId: string): Promise<ParticipantItem> {
-  return apiFetch(`/public/participants/${participantId}`)
-}
-
 // ─── Public API (no auth required) ──────────────────────────────
 
 export interface PublicParticipant {
@@ -517,12 +514,22 @@ export const paymentMethods: PaymentMethod[] = [
 export async function getPublicParticipants(
   page = 1,
   limit = 50,
+  eventId?: string,
 ): Promise<{ items: PublicParticipant[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> {
-  return apiFetch(`/participants/public?page=${page}&limit=${limit}`)
+  const qs = new URLSearchParams({ page: String(page), limit: String(limit) })
+  // Backend expects snake_case `event_id` on this query param (FastAPI route
+  // signature, not aliased) — response bodies come back camelCase via
+  // CamelModel, but incoming query params do not.
+  if (eventId) qs.set('event_id', eventId)
+  return apiFetch(`/participants/public?${qs.toString()}`)
 }
 
 export async function getParticipant(id: string): Promise<{ participant: ParticipantItem }> {
   return apiFetch(`/participants/${id}`)
+}
+
+export async function getPublicParticipant(id: string): Promise<ParticipantItem> {
+  return apiFetch(`/participants/public/${id}`)
 }
 
 export async function getPublicLeaderboard(): Promise<{ leaderboard: PublicLeaderboardEntry[] }> {

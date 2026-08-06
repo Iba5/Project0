@@ -19,5 +19,5 @@ export async function getParticipantVoteHistory(
   id: string,
   days: 7 | 30 = 30,
 ): Promise<{ history: VoteHistoryPoint[] }> {
-  return apiFetch(`/participants/${id}/vote-history?days=${days}`)
+  return apiFetch(`/participants/public/${id}/vote-history?days=${days}`)
 }

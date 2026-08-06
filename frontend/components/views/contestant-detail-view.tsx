@@ -36,7 +36,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useAppStore } from '@/lib/store'
 import { useRouter } from 'next/navigation'
 import {
-  getParticipant,
+  getPublicParticipant,
   getPublicParticipants,
   getPublicLeaderboard,
   type ParticipantItem,
@@ -343,9 +343,9 @@ export default function ContestantDetailView({ participantId }: { participantId:
       return
     }
     try {
-      const data = await getParticipant(selectedParticipantId)
-      setParticipant(data.participant)
-      prevVotesRef.current = data.participant.votes
+      const data = await getPublicParticipant(selectedParticipantId)
+      setParticipant(data)
+      prevVotesRef.current = data.votes
     } catch {
       // Handle error
     } finally {
@@ -354,12 +354,14 @@ export default function ContestantDetailView({ participantId }: { participantId:
   }
 
   useEffect(() => {
-    setLoading(true)
-    setParticipant(null)
-    setLeaderboard([])
-    setRelated([])
-    prevVotesRef.current = null
-    loadParticipant()
+    queueMicrotask(() => {
+      setLoading(true)
+      setParticipant(null)
+      setLeaderboard([])
+      setRelated([])
+      prevVotesRef.current = null
+      loadParticipant()
+    })
   }, [selectedParticipantId])
 
   // 1. Real-time vote updates via WebSocket (with fallback polling at 30s)
@@ -368,7 +370,9 @@ export default function ContestantDetailView({ participantId }: { participantId:
 
   useEffect(() => {
     if (!selectedParticipantId) return
-    setPolling(true)
+    queueMicrotask(() => {
+      setPolling(true)
+    })
 
     // Join the participant room to receive targeted vote updates
     joinParticipant(selectedParticipantId)
@@ -401,8 +405,8 @@ export default function ContestantDetailView({ participantId }: { participantId:
     // Fallback polling at 30s in case WebSocket disconnects
     const interval = setInterval(async () => {
       try {
-        const data = await getParticipant(selectedParticipantId)
-        const next = data.participant
+        const data = await getPublicParticipant(selectedParticipantId)
+        const next = data
         setParticipant((prev) => {
           if (!prev) return next
           if (next.votes !== prev.votes) {
@@ -479,7 +483,9 @@ export default function ContestantDetailView({ participantId }: { participantId:
   useEffect(() => {
     if (!participant) return
     let cancelled = false
-    setHistoryLoading(true)
+    queueMicrotask(() => {
+      setHistoryLoading(true)
+    })
     getParticipantVoteHistory(participant.id, historyDays)
       .then((res) => {
         if (!cancelled) setVoteHistory(res.history)
@@ -520,7 +526,7 @@ export default function ContestantDetailView({ participantId }: { participantId:
     setTimeout(() => setConfettiActive(false), 1000)
     // Refresh participant data
     if (participant) {
-      getParticipant(participant.id).then(({ participant: p }) => {
+      getPublicParticipant(participant.id).then((p) => {
         prevVotesRef.current = p.votes
         setParticipant(p)
       }).catch(() => {})
