@@ -71,7 +71,7 @@ class PaynowClient:
     ) -> Dict[str, Any]:
         """
         Creates a web payment via Paynow and sends it.
-        Returns dict with: success, redirect_url, poll_url, instructions
+        Returns normalized dict with: success, redirect_url, poll_url, error
         """
         sdk = self._get_sdk()
 
@@ -79,22 +79,30 @@ class PaynowClient:
         payment.add(item_name, amount)
         response = sdk.send(payment)
 
+        # Inspect response object to understand actual SDK structure
+        logger.info(f"Paynow web payment response type: {type(response)}")
+        logger.info(f"Paynow web payment response vars: {vars(response)}")
+        logger.info(f"Paynow web payment response dir: {dir(response)}")
+
         if response.success:
             logger.info(f"Paynow web payment initiated: ref={reference}, poll_url={response.poll_url}")
             return {
                 "success": True,
                 "redirect_url": response.redirect_url,
                 "poll_url": response.poll_url,
-                "instructions": None
+                "error": None
             }
         else:
-            logger.error(f"Paynow web payment failed: ref={reference}, errors={response.errors}")
+            # Get error from response - try 'error' first, then fallback to 'errors'
+            error_msg = getattr(response, 'error', None) or getattr(response, 'errors', None)
+            if isinstance(error_msg, list):
+                error_msg = "; ".join(str(e) for e in error_msg)
+            logger.error(f"Paynow web payment failed: ref={reference}, error={error_msg}")
             return {
                 "success": False,
                 "redirect_url": None,
                 "poll_url": None,
-                "instructions": None,
-                "errors": getattr(response, 'errors', [])
+                "error": str(error_msg) if error_msg else "Unknown error"
             }
 
     def create_mobile_payment(
@@ -109,6 +117,7 @@ class PaynowClient:
         """
         Creates a mobile (express) checkout payment via Paynow.
         Supports ecocash and onemoney methods.
+        Returns normalized dict with: success, redirect_url, poll_url, instructions, error
         """
         sdk = self._get_sdk()
 
@@ -121,22 +130,32 @@ class PaynowClient:
         payment.add(item_name, amount)
         response = sdk.send_mobile(payment, phone, method)
 
+        # Inspect response object to understand actual SDK structure
+        logger.info(f"Paynow mobile payment response type: {type(response)}")
+        logger.info(f"Paynow mobile payment response vars: {vars(response)}")
+        logger.info(f"Paynow mobile payment response dir: {dir(response)}")
+
         if response.success:
             logger.info(f"Paynow mobile payment initiated: ref={reference}, phone={phone[:4]}***, method={method}")
             return {
                 "success": True,
                 "redirect_url": None,
                 "poll_url": response.poll_url,
-                "instructions": response.instructions
+                "instructions": response.instructions,
+                "error": None
             }
         else:
-            logger.error(f"Paynow mobile payment failed: ref={reference}, errors={response.errors}")
+            # Get error from response - try 'error' first, then fallback to 'errors'
+            error_msg = getattr(response, 'error', None) or getattr(response, 'errors', None)
+            if isinstance(error_msg, list):
+                error_msg = "; ".join(str(e) for e in error_msg)
+            logger.error(f"Paynow mobile payment failed: ref={reference}, error={error_msg}")
             return {
                 "success": False,
                 "redirect_url": None,
                 "poll_url": None,
                 "instructions": None,
-                "errors": getattr(response, 'errors', [])
+                "error": str(error_msg) if error_msg else "Unknown error"
             }
 
     def check_transaction_status(self, poll_url: str) -> Dict[str, Any]:

@@ -1322,8 +1322,7 @@ class PaymentService:
             )
 
         if not paynow_response.get("success"):
-            errors = paynow_response.get("errors", [])
-            error_msg = "; ".join(errors) if errors else "Paynow payment initiation failed."
+            error_msg = paynow_response.get("error", "Paynow payment initiation failed.")
             AuditService.log_action(
                 db=self.db,
                 action="Payment Initiation Failed",
