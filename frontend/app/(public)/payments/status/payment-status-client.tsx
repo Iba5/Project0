@@ -45,10 +45,12 @@ export default function PaymentStatusClient() {
 
     try {
       setPolling(true)
+      console.log(`[FRONTEND POLL] Checking payment status for reference: ${reference}`)
       const data = await checkPaymentStatus(reference) as PaymentStatusData
+      console.log(`[FRONTEND POLL] Response for reference ${reference}:`, data)
       setStatusData(data)
     } catch (error) {
-      console.error('Failed to fetch payment status:', error)
+      console.error('[FRONTEND POLL] Failed to fetch payment status:', error)
       toast.error('Failed to fetch payment status')
     } finally {
       setLoading(false)

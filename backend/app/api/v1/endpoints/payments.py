@@ -111,8 +111,13 @@ def initiate_payment(payment_in: PaymentCreate, request: Request, db: Session = 
                 "Can be called by the frontend for real-time status updates.",
 )
 def check_payment_status(reference: str, db: Session = Depends(get_db)):
+    logger.info(f"=== API Payment Status Check Start ===")
+    logger.info(f"Frontend requesting status check for reference: {reference}")
     payment_service = PaymentService(db)
-    return payment_service.check_payment_status(reference)
+    result = payment_service.check_payment_status(reference)
+    logger.info(f"Returning status check result for reference {reference}: paid={result.paid}, status={result.status}")
+    logger.info(f"=== API Payment Status Check End ===")
+    return result
 
 
 @router.post(
@@ -147,6 +152,7 @@ async def paynow_callback(
     request: Request,
     db: Session = Depends(get_db)
 ):
+    
     """
     Validates webhook signatures and credits vote transactions.
     

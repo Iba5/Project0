@@ -1383,18 +1383,23 @@ class PaymentService:
         6. Commit atomically — rollback on ANY failure
         7. Log security audit
         """
+        logger.info("=== Paynow Callback Processing Start ===")
+        logger.info(f"Callback data received: {callback_data}")
         reference: Optional[str] = callback_data.get("reference")
         paynow_status: Optional[str] = callback_data.get("status")
+        logger.info(f"Callback reference: {reference}, status: {paynow_status}")
 
         # --- 1. Verify webhook signature ---
+        logger.info(f"Verifying webhook signature for reference: {reference}")
         if not self.paynow_client.verify_callback(callback_data):
-            logger.error(f"Security Alert | Paynow signature verification failed for ref: {reference}")
+            logger.error(f"❌ SECURITY ALERT: Paynow signature verification failed for ref: {reference}")
             AuditService.log_action(
                 db=self.db,
                 action="Payment Webhook Verification Failed",
                 details=f"Webhook signature check failed for reference {reference}"
             )
             raise VotingException("Signature check failed")
+        logger.info(f"✅ Webhook signature verified for reference: {reference}")
 
         if not reference:
             raise NotFoundException("Payment reference missing from callback payload")
@@ -1402,43 +1407,54 @@ class PaymentService:
         # --- 2. Cross-reference with internal payment AND lock the row ---
         # C1 FIX: Use select_for_update() to prevent concurrent webhook + manual poll
         # from both passing idempotency checks and double-crediting votes.
+        logger.info(f"Looking up payment with reference: {reference} (with row lock)")
         payment = self.db.execute(
             select(Payment).where(Payment.reference == reference).with_for_update()
         ).scalar_one_or_none()
 
         if not payment:
-            logger.error(f"Callback received for non-existent payment reference: {reference}")
+            logger.error(f"❌ Callback received for non-existent payment reference: {reference}")
             raise NotFoundException(f"Payment reference {reference} not found")
 
+        logger.info(f"✅ Payment found: {payment.id}, current status: {payment.status}, has poll_url: {bool(payment.poll_url)}")
+
         # --- 3. Check Idempotency (AFTER acquiring row lock) ---
+        logger.info(f"Checking idempotency for payment: {payment.id}")
         if self.idempotency_service.is_callback_already_processed(payment):
-            logger.info(f"Payment reference {reference} callback already processed. Skipping.")
+            logger.info(f"⚠️ Payment reference {reference} callback already processed. Skipping.")
             return
+        logger.info(f"✅ Idempotency check passed - callback not previously processed")
 
         # --- 4. DUAL VERIFICATION: Active poll_url check ---
         if payment.poll_url:
             try:
+                logger.info(f"Initiating dual verification via poll_url for reference: {reference}")
                 poll_result = self.paynow_client.check_transaction_status(payment.poll_url)
+                logger.info(f"Dual verification poll result for reference {reference}: {poll_result}")
                 if poll_result.get("paid"):
                     paynow_status = "paid"  # Trust the active poll over webhook
-                    logger.info(f"Dual verification confirmed PAID for ref: {reference} via poll_url")
+                    logger.info(f"✅ Dual verification confirmed PAID for ref: {reference} via poll_url")
                 elif poll_result.get("error"):
                     logger.warning(
-                        f"Poll_url check error for ref {reference}: {poll_result['error']}. "
+                        f"⚠️ Poll_url check error for ref {reference}: {poll_result['error']}. "
                         f"Falling back to webhook status: {paynow_status}"
                     )
             except Exception as e:
                 logger.warning(
-                    f"Could not verify via poll_url for ref {reference}: {str(e)}. "
+                    f"⚠️ Could not verify via poll_url for ref {reference}: {str(e)}. "
                     f"Falling back to webhook status: {paynow_status}"
                 )
+        else:
+            logger.warning(f"⚠️ No poll_url available for reference: {reference} - skipping dual verification")
 
         # --- 5. ACID Transaction Block ---
         try:
             # Paynow documentation: "Paid", "Awaiting Delivery", and "Delivered" are all successful payment statuses
             # Reference: https://developers.paynow.co.zw/docs/paynow/status_update/
             normalized_status = str(paynow_status).lower() if paynow_status else ""
+            logger.info(f"Processing payment with normalized status: {normalized_status}")
             if normalized_status in ("paid", "successful", "awaiting delivery", "delivered"):
+                logger.info(f"✅ Payment successful - proceeding to credit votes for reference: {reference}")
                 # Calculate votes using centralized helper: floor(amount / votePrice)
                 from app.utils.payment_utils import resolve_vote_price, calculate_votes_from_amount
                 
@@ -1450,18 +1466,23 @@ class PaymentService:
                 
                 vote_price = resolve_vote_price(event_vote_price)
                 votes_to_add = calculate_votes_from_amount(payment.amount, vote_price)
+                logger.info(f"Calculated votes to add: {votes_to_add} for amount: {payment.amount} with vote price: {vote_price}")
 
                 if not payment.contestant_id:
+                    logger.error(f"❌ Payment {reference} has no associated contestant; cannot credit votes.")
                     raise VotingException(
                         f"Payment {reference} has no associated contestant; cannot credit votes."
                     )
 
                 # Fraud detection — uses calculated votes from actual amount
+                logger.info(f"Running fraud detection for contestant: {payment.contestant_id} with votes: {votes_to_add}")
                 self.fraud_service.detect_suspicious_voting(payment.contestant_id, votes_to_add)
 
                 # Update payment status
+                logger.info(f"Updating payment status to PAID for payment: {payment.id}")
                 payment.status = PaymentStatus.PAID
 
+                logger.info(f"Creating vote transaction for payment: {payment.id}")
                 vote_txn = VoteTransaction(
                     payment_id=payment.id,
                     contestant_id=payment.contestant_id,
@@ -1474,6 +1495,7 @@ class PaymentService:
                 # Previously: contestant.votes += votes_to_add (read-modify-write).
                 # Two concurrent callbacks for the same contestant could both
                 # read votes=100, both write votes=101, losing one vote.
+                logger.info(f"Atomic vote increment for contestant: {payment.contestant_id} by {votes_to_add}")
                 result: CursorResult[Any] = self.db.execute(  # type: ignore[assignment]
                     sa_update(Participant)
                     .where(Participant.id == payment.contestant_id,
@@ -1481,11 +1503,13 @@ class PaymentService:
                     .values(votes=Participant.votes + votes_to_add)
                 )
                 if result.rowcount == 0:
+                    logger.error(f"❌ Contestant {payment.contestant_id} not found or soft-deleted. Payment {reference} was paid but no votes were credited.")
                     raise VotingException(
                         f"Contestant {payment.contestant_id} not found or soft-deleted. "
                         f"Payment {reference} was paid but no votes were credited."
                     )
 
+                logger.info(f"Creating audit log for payment: {payment.id}")
                 audit_entry = AuditLog(
                     action="Payment Verified",
                     details=(
@@ -1497,25 +1521,33 @@ class PaymentService:
                 self.db.add(audit_entry)
 
                 # COMMIT — atomic
+                logger.info(f"Committing transaction for reference: {reference}")
                 self.db.commit()
-                logger.info(f"Transaction committed successfully. reference: {reference}.")
+                logger.info(f"✅ SUCCESS: Transaction committed successfully for reference: {reference}.")
                 
                 # Invalidate cache after vote crediting
+                logger.info(f"Invalidating vote cache for contestant: {payment.contestant_id}, event: {payment.event_id}")
                 self._invalidate_vote_cache(payment.contestant_id, payment.event_id)
             else:
+                logger.info(f"Payment status not successful (status: {normalized_status}) - marking as FAILED")
                 payment.status = PaymentStatus.FAILED
 
                 # Audit log for failure (use direct SQL insert to stay inside transaction)
+                logger.info(f"Creating failure audit log for reference: {reference}")
                 audit_entry = AuditLog(
                     action="Payment Failed",
                     details=f"Payment reference {reference} reported failed status: {paynow_status}"
                 )
                 self.db.add(audit_entry)
+                logger.info(f"Committing FAILED status for reference: {reference}")
                 self.db.commit()
+                logger.info(f"✅ Payment marked as FAILED for reference: {reference}")
         except Exception as e:
+            logger.error(f"❌ ERROR: Transaction rolled back during callback process for reference {reference}: {str(e)}")
             self.db.rollback()
-            logger.error(f"Transaction rolled back during callback process: {str(e)}")
             raise
+        finally:
+            logger.info(f"=== Paynow Callback Processing End ===")
 
     def _invalidate_vote_cache(self, contestant_id: str, event_id: Optional[str] = None):
         """Invalidate participant and leaderboard caches after vote updates."""
@@ -1541,6 +1573,8 @@ class PaymentService:
         Uses select_for_update() to prevent concurrent requests from
         crediting the same vote twice (H5 race condition fix).
         """
+        logger.info(f"=== Payment Status Check Start ===")
+        logger.info(f"Checking payment status for reference: {reference}")
         # Fix: Acquire lock on initial query to prevent race condition with callback
         payment = self.db.execute(
             select(Payment).where(Payment.reference == reference).with_for_update()
@@ -1548,6 +1582,9 @@ class PaymentService:
         
         if not payment:
             raise NotFoundException(f"Payment reference {reference} not found")
+
+        logger.info(f"Current payment status in DB: {payment.status}")
+        logger.info(f"Payment has poll_url: {bool(payment.poll_url)}")
 
         # If already in a final state, return immediately
         if payment.status in (PaymentStatus.PAID, PaymentStatus.FAILED, PaymentStatus.CANCELLED, PaymentStatus.REFUNDED, PaymentStatus.EXPIRED):
@@ -1580,8 +1617,11 @@ class PaymentService:
         # Try to actively check via poll_url
         if payment.poll_url:
             try:
+                logger.info(f"Initiating poll_url check for reference: {reference}")
                 poll_result = self.paynow_client.check_transaction_status(payment.poll_url)
+                logger.info(f"Poll result for reference {reference}: {poll_result}")
                 if poll_result.get("paid"):
+                    logger.info(f"Paynow poll confirms PAID for reference: {reference} - CREDITING VOTES")
                     # Directly apply the vote in this transaction (skip webhook signature)
                     try:
                         # Calculate votes using centralized helper: floor(amount / votePrice)
@@ -1595,12 +1635,14 @@ class PaymentService:
                         
                         vote_price = resolve_vote_price(event_vote_price)
                         votes_to_add = calculate_votes_from_amount(payment.amount, vote_price)
+                        logger.info(f"Calculated votes to add: {votes_to_add} for amount: {payment.amount} with vote price: {vote_price}")
 
                         payment.status = PaymentStatus.PAID
 
                         # Check idempotency — has a vote txn already been created?
                         existing_vote = self.vote_repo.get_by_payment_id(payment.id)
                         if not existing_vote:
+                            logger.info(f"Creating new vote transaction for payment: {payment.id}")
                             vote_txn = VoteTransaction(
                                 payment_id=payment.id,
                                 contestant_id=payment.contestant_id,
@@ -1608,9 +1650,12 @@ class PaymentService:
                                 event_id=payment.event_id,
                             )
                             self.db.add(vote_txn)
+                        else:
+                            logger.info(f"Vote transaction already exists for payment: {payment.id} - skipping creation")
 
                         # H1 FIX: Same atomic SQL UPDATE as callback path
                         if payment.contestant_id:
+                            logger.info(f"Incrementing contestant votes for contestant: {payment.contestant_id} by {votes_to_add}")
                             self.db.execute(
                                 sa_update(Participant)
                                 .where(Participant.id == payment.contestant_id,
@@ -1619,7 +1664,7 @@ class PaymentService:
                             )
 
                         self.db.commit()
-                        logger.info(f"Manual poll confirmed PAID for ref: {reference}")
+                        logger.info(f"✅ SUCCESS: Manual poll confirmed PAID for ref: {reference} - Votes credited and committed")
                         
                         # Fetch contestant details for response
                         contestant_name = None
@@ -1629,10 +1674,12 @@ class PaymentService:
                             if contestant:
                                 contestant_name = contestant.name
                                 current_total_votes = contestant.votes
-                    except Exception:
+                    except Exception as e:
+                        logger.error(f"❌ ERROR: Failed to credit votes during manual poll for ref: {reference}: {str(e)}")
                         self.db.rollback()
                         raise
 
+                    logger.info(f"Returning PAID status for reference: {reference}")
                     return PaymentStatusCheckResponse(
                         reference=reference,
                         status=PaymentStatus.PAID,
@@ -1645,11 +1692,15 @@ class PaymentService:
                     )
             except Exception as e:
                 logger.warning(f"Manual status check failed for {reference}: {str(e)}")
+        else:
+            logger.warning(f"No poll_url available for reference: {reference} - cannot actively check status")
 
         # NOTE: payment.status can only be CREATED, PENDING, or PROCESSING at
         # this point — all terminal states (PAID, FAILED, CANCELLED, REFUNDED,
         # EXPIRED) were already returned above. So `paid` is always False here;
         # this is not a bug, just documenting why it's a constant.
+        logger.info(f"Returning current status for reference: {reference} - status: {payment.status}, paid: False")
+        logger.info(f"=== Payment Status Check End ===")
         return PaymentStatusCheckResponse(
             reference=reference,
             status=payment.status,

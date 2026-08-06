@@ -98,7 +98,7 @@ if not settings.DEBUG:
 # Parse CORS origins from comma-separated env var
 _cors_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
 
-# 2. CORS
+# 2. CORS - Standard middleware with wildcard allows both browser and server-to-server requests
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,

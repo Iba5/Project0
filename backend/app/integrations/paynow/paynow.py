@@ -248,8 +248,13 @@ class PaynowClient:
         sdk = self._get_sdk()
 
         try:
+            logger.info("=== Paynow Poll Start ===")
+            logger.info(f"Polling Paynow: {poll_url}")
             txn_status = sdk.check_transaction_status(poll_url)
-            logger.info(f"Paynow status check via poll_url: paid={txn_status.paid}")
+            logger.info(f"Paynow poll response raw: {repr(txn_status)}")
+            logger.info(f"Paynow poll response paid: {txn_status.paid}")
+            logger.info(f"Paynow poll response status: {str(txn_status.status) if hasattr(txn_status, 'status') else 'N/A'}")
+            logger.info("=== Paynow Poll End ===")
             return {
                 "paid": txn_status.paid,
                 "status": str(txn_status.status) if hasattr(txn_status, 'status') else None
