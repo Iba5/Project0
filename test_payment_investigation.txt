@@ -1,0 +1,131 @@
+==================== TEST PAYMENT MODEL ====================
+backend/app/models/models.py:245:class TestPayment(Base):
+backend/app/repositories/repositories.py:393:class TestPaymentRepository(BaseRepository[TestPayment]):
+backend/app/schemas/schemas.py:343:class TestPaymentItemResponse(CamelModel):
+backend/app/schemas/schemas.py:360:class TestPaymentListResponse(CamelModel):
+backend/app/schemas/schemas.py:366:class TestPaymentCompleteResponse(CamelModel):
+backend/app/schemas/schemas.py:376:class TestPaymentCleanupResponse(CamelModel):
+backend/app/services/services.py:1284:        test_payment = TestPayment(
+
+==================== _INITIATE_TEST_PAYMENT ====================
+backend/app/services/services.py:1250:            return self._initiate_test_payment(
+backend/app/services/services.py:1261:            return self._initiate_test_payment(
+backend/app/services/services.py:1270:    def _initiate_test_payment(
+
+==================== VOTER_NAME REFERENCES ====================
+backend/app/models/models.py:143:    voter_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)                # Name of actual voter (if proxy)
+backend/app/api/v1/endpoints/payments.py:40:                voter_name=result.voter_name,
+backend/app/schemas/schemas.py:227:    voter_name: Optional[str] = None
+backend/app/schemas/schemas.py:286:    voter_name: Optional[str] = None
+backend/app/schemas/schemas.py:311:    voter_name: Optional[str] = Field(None, min_length=1, max_length=200)
+backend/app/services/services.py:1239:                    voter_name=existing.voter_name,
+backend/app/services/services.py:1325:            voter_name=test_payment.voter_name,
+backend/app/services/services.py:1428:            voter_name=None,
+backend/app/services/services.py:1703:        if details_in.voter_name:
+backend/app/services/services.py:1704:            payment.voter_name = details_in.voter_name
+backend/app/services/services.py:1705:            updated_fields.append(f"name={details_in.voter_name}")
+backend/app/services/services.py:1749:                "voterName": p.voter_name,
+
+==================== VOTER_EMAIL REFERENCES ====================
+backend/app/models/models.py:144:    voter_email: Mapped[Optional[str]] = mapped_column(String, nullable=True)               # Email of actual voter (if proxy)
+backend/app/models/models.py:259:    voter_email: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+backend/app/api/v1/endpoints/payments.py:41:                voter_email=result.voter_email,
+backend/app/api/v1/endpoints/payments.py:282:        voter_email=test_payment.voter_email,
+backend/app/api/v1/endpoints/payments.py:371:            voter_email=tp.voter_email,
+backend/app/schemas/schemas.py:228:    voter_email: Optional[str] = None
+backend/app/schemas/schemas.py:245:    voter_email: Optional[str] = None
+backend/app/schemas/schemas.py:266:    # NOTE: voter_phone and voter_email are intentionally NOT exposed here
+backend/app/schemas/schemas.py:287:    voter_email: Optional[str] = None
+backend/app/schemas/schemas.py:312:    voter_email: Optional[EmailStr] = None
+backend/app/schemas/schemas.py:351:    voter_email: Optional[str] = None
+backend/app/services/services.py:1240:                    voter_email=existing.voter_email,
+backend/app/services/services.py:1291:            voter_email=payment_in.voter_email,
+backend/app/services/services.py:1326:            voter_email=test_payment.voter_email,
+backend/app/services/services.py:1353:            voter_email=payment_in.voter_email,
+backend/app/services/services.py:1364:        voter_email = payment_in.voter_email or "voter@example.com"
+backend/app/services/services.py:1370:                    email=voter_email,
+backend/app/services/services.py:1379:                    email=voter_email,
+backend/app/services/services.py:1429:            voter_email=payment_in.voter_email,
+backend/app/services/services.py:1707:        if details_in.voter_email:
+backend/app/services/services.py:1708:            payment.voter_email = details_in.voter_email
+backend/app/services/services.py:1709:            updated_fields.append(f"email={details_in.voter_email}")
+backend/app/services/services.py:1750:                "voterEmail": p.voter_email,
+
+==================== TEST PAYMENT CREATION ====================
+backend/migrations/versions/181cca4e29d6_initial_clean_schema.py:150:    op.add_column('test_payments', sa.Column('event_id', sa.String(), nullable=True))
+backend/migrations/versions/181cca4e29d6_initial_clean_schema.py:151:    op.drop_constraint(op.f('test_payments_reference_key'), 'test_payments', type_='unique')
+backend/migrations/versions/181cca4e29d6_initial_clean_schema.py:152:    op.drop_index(op.f('ix_test_payments_reference'), table_name='test_payments')
+backend/migrations/versions/181cca4e29d6_initial_clean_schema.py:153:    op.create_index(op.f('ix_test_payments_reference'), 'test_payments', ['reference'], unique=True)
+backend/migrations/versions/181cca4e29d6_initial_clean_schema.py:154:    op.drop_column('test_payments', 'competition_id')
+backend/migrations/versions/181cca4e29d6_initial_clean_schema.py:231:    op.add_column('test_payments', sa.Column('competition_id', sa.VARCHAR(), autoincrement=False, nullable=True))
+backend/migrations/versions/181cca4e29d6_initial_clean_schema.py:232:    op.drop_index(op.f('ix_test_payments_reference'), table_name='test_payments')
+backend/migrations/versions/181cca4e29d6_initial_clean_schema.py:233:    op.create_index(op.f('ix_test_payments_reference'), 'test_payments', ['reference'], unique=False)
+backend/migrations/versions/181cca4e29d6_initial_clean_schema.py:234:    op.create_unique_constraint(op.f('test_payments_reference_key'), 'test_payments', ['reference'], postgresql_nulls_not_distinct=False)
+backend/migrations/versions/181cca4e29d6_initial_clean_schema.py:235:    op.drop_column('test_payments', 'event_id')
+backend/app/models/models.py:250:    __tablename__ = "test_payments"
+backend/app/models/models.py:262:    is_test_payment: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+backend/app/repositories/repositories.py:414:    def update_status(self, test_payment: TestPayment, status: str) -> TestPayment:
+backend/app/repositories/repositories.py:415:        test_payment.status = status
+backend/app/repositories/repositories.py:416:        test_payment.updated_at = datetime.now(timezone.utc)
+backend/app/repositories/repositories.py:418:        self.db.refresh(test_payment)
+backend/app/repositories/repositories.py:419:        return test_payment
+backend/app/repositories/repositories.py:421:    def create(self, test_payment: TestPayment) -> TestPayment:
+backend/app/repositories/repositories.py:422:        self.db.add(test_payment)
+backend/app/repositories/repositories.py:424:        self.db.refresh(test_payment)
+backend/app/repositories/repositories.py:425:        return test_payment
+backend/app/repositories/repositories.py:427:    def delete(self, test_payment: TestPayment) -> bool:
+backend/app/repositories/repositories.py:429:            self.db.delete(test_payment)
+backend/app/repositories/repositories.py:436:    def get_all_test_payments(self, offset: int = 0, limit: int = 100) -> List[TestPayment]:
+backend/app/api/v1/endpoints/payments.py:229:def complete_test_payment(
+backend/app/api/v1/endpoints/payments.py:250:    test_payment_repo = TestPaymentRepository(db)
+backend/app/api/v1/endpoints/payments.py:251:    test_payment = test_payment_repo.get_by_reference(reference)
+backend/app/api/v1/endpoints/payments.py:253:    if not test_payment:
+backend/app/api/v1/endpoints/payments.py:259:    if test_payment.status != "created":
+backend/app/api/v1/endpoints/payments.py:262:            detail=f"Test payment already has status: {test_payment.status}"
+backend/app/api/v1/endpoints/payments.py:267:    contestant = part_repo.get_by_id(test_payment.contestant_id)
+backend/app/api/v1/endpoints/payments.py:276:        reference=test_payment.reference,
+backend/app/api/v1/endpoints/payments.py:277:        contestant_id=test_payment.contestant_id,
+backend/app/api/v1/endpoints/payments.py:278:        amount=test_payment.amount,
+backend/app/api/v1/endpoints/payments.py:279:        payment_method=test_payment.payment_method,
+backend/app/api/v1/endpoints/payments.py:281:        voter_phone=test_payment.voter_phone,
+backend/app/api/v1/endpoints/payments.py:282:        voter_email=test_payment.voter_email,
+backend/app/api/v1/endpoints/payments.py:283:        event_id=test_payment.event_id,
+backend/app/api/v1/endpoints/payments.py:285:        paynow_redirect_url=test_payment.test_redirect_url
+backend/app/api/v1/endpoints/payments.py:295:    event = event_repo.get_by_id(test_payment.event_id) if test_payment.event_id else None
+backend/app/api/v1/endpoints/payments.py:298:    votes_awarded = calculate_votes_from_amount(test_payment.amount, vote_price)
+backend/app/api/v1/endpoints/payments.py:303:        contestant_id=test_payment.contestant_id,
+backend/app/api/v1/endpoints/payments.py:305:        event_id=test_payment.event_id
+backend/app/api/v1/endpoints/payments.py:313:    test_payment.status = "completed"
+backend/app/api/v1/endpoints/payments.py:314:    test_payment.updated_at = datetime.now(timezone.utc)
+backend/app/api/v1/endpoints/payments.py:322:        details=f"Test payment {reference} completed for contestant {contestant.name} (${test_payment.amount})"
+backend/app/api/v1/endpoints/payments.py:331:        amount=str(test_payment.amount),
+backend/app/api/v1/endpoints/payments.py:344:def list_test_payments(
+backend/app/api/v1/endpoints/payments.py:360:    test_payment_repo = TestPaymentRepository(db)
+backend/app/api/v1/endpoints/payments.py:361:    test_payments = test_payment_repo.get_all_test_payments()
+backend/app/api/v1/endpoints/payments.py:379:        for tp in test_payments
+backend/app/api/v1/endpoints/payments.py:381:    return TestPaymentListResponse(test_payments=items, total=len(items))
+backend/app/api/v1/endpoints/payments.py:391:def cleanup_test_payments(
+backend/app/api/v1/endpoints/payments.py:408:    test_payment_repo = TestPaymentRepository(db)
+backend/app/api/v1/endpoints/payments.py:409:    test_payments = test_payment_repo.get_all_test_payments()
+backend/app/api/v1/endpoints/payments.py:412:    for tp in test_payments:
+backend/app/api/v1/endpoints/payments.py:413:        test_payment_repo.delete(tp)
+backend/app/schemas/schemas.py:362:    test_payments: List[TestPaymentItemResponse]
+backend/app/services/services.py:1056:        self.test_payment_repo = TestPaymentRepository(db)
+backend/app/services/services.py:1250:            return self._initiate_test_payment(
+backend/app/services/services.py:1261:            return self._initiate_test_payment(
+backend/app/services/services.py:1270:    def _initiate_test_payment(
+backend/app/services/services.py:1284:        test_payment = TestPayment(
+backend/app/services/services.py:1294:            is_test_payment=True,
+backend/app/services/services.py:1304:        self.test_payment_repo.create(test_payment)
+backend/app/services/services.py:1306:        logger.info(f"Test payment created: {reference} for contestant {part.name} (${vote_price})")
+backend/app/services/services.py:1311:            action="Test Payment Created",
+backend/app/services/services.py:1317:            id=test_payment.id,
+backend/app/services/services.py:1318:            reference=test_payment.reference,
+backend/app/services/services.py:1319:            redirect_url=test_payment.test_redirect_url,  # Fixed: TestPayment uses test_redirect_url
+backend/app/services/services.py:1321:            amount=str(test_payment.amount),
+backend/app/services/services.py:1322:            payment_method=test_payment.payment_method,
+backend/app/services/services.py:1323:            status=test_payment.status,
+backend/app/services/services.py:1324:            contestant_id=test_payment.contestant_id,
+backend/app/services/services.py:1325:            voter_name=test_payment.voter_name,
+backend/app/services/services.py:1326:            voter_email=test_payment.voter_email,
+backend/app/services/services.py:1327:            created_at=test_payment.created_at,
