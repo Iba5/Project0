@@ -114,22 +114,31 @@ export function QuickVoteDialog({
     setProcessing(true)
     try {
       const result = await initiatePayment({
-        amount: effectiveAmount,
-        paymentMethod: method.method,
-        contestantId: participant.id,
-        voterPhone: phone,
-        idempotencyKey: idempotencyKey,
-      })
-      setPaymentInitiated(true)
-      toast.success(`Payment initiated for ${participant.name}!`, {
-        description: `Complete payment in the Paynow window. Reference: ${result.payment.reference}`,
-      })
-      setTimeout(() => {
-        onOpenChange(false)
-        onVoted?.()
-      }, 1100)
-      console.log("PAYMENT RESULT", result)
-      console.log("Redirect URL", result.payment.paynowRedirectUrl)
+          amount: effectiveAmount,
+          paymentMethod: method.method,
+          contestantId: participant.id,
+          voterPhone: phone,
+          idempotencyKey,
+        })
+
+        setPaymentInitiated(true)
+
+        toast.success(`Payment initiated for ${participant.name}!`, {
+          description: `Redirecting to Paynow...`,
+        })
+
+        console.log("PAYMENT RESULT", result)
+        console.log("Redirect URL", result.payment.paynowRedirectUrl)
+
+        if (!result.payment.paynowRedirectUrl) {
+          throw new Error("Payment gateway did not return a redirect URL.")
+        }
+
+        // Give the toast a brief moment to appear
+        setTimeout(() => {
+          window.location.href = result.payment.paynowRedirectUrl!
+        }, 800)
+        
     } catch (err) {
       toast.error('Quick Vote failed', {
         description: err instanceof Error ? err.message : 'Please try again',

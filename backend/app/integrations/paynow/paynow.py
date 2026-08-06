@@ -124,14 +124,19 @@ class PaynowClient:
                 logger.error("SDK response type: %s", type(response))
                 logger.error("SDK response repr: %r", response)
                 logger.error("SDK response dict: %s", getattr(response, "__dict__", None))
+                logger.error("SDK response.data: %s", getattr(response, "data", None))
                 logger.error("SDK success: %s", getattr(response, "success", None))
                 logger.error("SDK errors: %r", getattr(response, "errors", None))
                 logger.error("SDK error: %r", getattr(response, "error", None))
                 logger.error("SDK raw: %r", response)
                 logger.error("=== End SDK Debug ===")
 
-                # Get error from response - try 'error' first, then fallback to 'errors'
-                error_msg = getattr(response, 'error', None) or getattr(response, 'errors', None)
+                # Get error from response - try response.data["error"] first, then attributes
+                error_msg = None
+                if hasattr(response, 'data') and isinstance(response.data, dict):
+                    error_msg = response.data.get("error")
+                if not error_msg:
+                    error_msg = getattr(response, 'error', None) or getattr(response, 'errors', None)
                 if isinstance(error_msg, list):
                     error_msg = "; ".join(str(e) for e in error_msg)
                 logger.error(f"Paynow web payment failed: ref={reference}, error={error_msg}")
@@ -208,14 +213,19 @@ class PaynowClient:
                 logger.error("SDK response type: %s", type(response))
                 logger.error("SDK response repr: %r", response)
                 logger.error("SDK response dict: %s", getattr(response, "__dict__", None))
+                logger.error("SDK response.data: %s", getattr(response, "data", None))
                 logger.error("SDK success: %s", getattr(response, "success", None))
                 logger.error("SDK errors: %r", getattr(response, "errors", None))
                 logger.error("SDK error: %r", getattr(response, "error", None))
                 logger.error("SDK raw: %r", response)
                 logger.error("=== End SDK Debug ===")
 
-                # Get error from response - try 'error' first, then fallback to 'errors'
-                error_msg = getattr(response, 'error', None) or getattr(response, 'errors', None)
+                # Get error from response - try response.data["error"] first, then attributes
+                error_msg = None
+                if hasattr(response, 'data') and isinstance(response.data, dict):
+                    error_msg = response.data.get("error")
+                if not error_msg:
+                    error_msg = getattr(response, 'error', None) or getattr(response, 'errors', None)
                 if isinstance(error_msg, list):
                     error_msg = "; ".join(str(e) for e in error_msg)
                 logger.error(f"Paynow mobile payment failed: ref={reference}, error={error_msg}")
