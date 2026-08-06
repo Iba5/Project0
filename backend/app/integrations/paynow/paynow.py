@@ -105,30 +105,45 @@ class PaynowClient:
                 "error": "Email is required"
             }
 
-        payment = sdk.create_payment(reference, auth_email)
-        payment.add(item_name, amount)
-        response = sdk.send(payment)
+        try:
+            payment = sdk.create_payment(reference, auth_email)
+            payment.add(item_name, amount)
+            response = sdk.send(payment)
 
-        if response.success:
-            logger.info(f"Paynow web payment initiated: ref={reference}, poll_url={response.poll_url}")
-            return {
-                "success": True,
-                "redirect_url": response.redirect_url,
-                "poll_url": response.poll_url,
-                "error": None
-            }
-        else:
-            # Get error from response - try 'error' first, then fallback to 'errors'
-            error_msg = getattr(response, 'error', None) or getattr(response, 'errors', None)
-            if isinstance(error_msg, list):
-                error_msg = "; ".join(str(e) for e in error_msg)
-            logger.error(f"Paynow web payment failed: ref={reference}, error={error_msg}")
-            return {
-                "success": False,
-                "redirect_url": None,
-                "poll_url": None,
-                "error": str(error_msg) if error_msg else "Unknown error"
-            }
+            if response.success:
+                logger.info(f"Paynow web payment initiated: ref={reference}, poll_url={response.poll_url}")
+                return {
+                    "success": True,
+                    "redirect_url": response.redirect_url,
+                    "poll_url": response.poll_url,
+                    "error": None
+                }
+            else:
+                # Comprehensive debugging to expose SDK response details
+                logger.error("=== Paynow Web Payment SDK Response Debug ===")
+                logger.error("SDK response type: %s", type(response))
+                logger.error("SDK response repr: %r", response)
+                logger.error("SDK response dict: %s", getattr(response, "__dict__", None))
+                logger.error("SDK success: %s", getattr(response, "success", None))
+                logger.error("SDK errors: %r", getattr(response, "errors", None))
+                logger.error("SDK error: %r", getattr(response, "error", None))
+                logger.error("SDK raw: %r", response)
+                logger.error("=== End SDK Debug ===")
+
+                # Get error from response - try 'error' first, then fallback to 'errors'
+                error_msg = getattr(response, 'error', None) or getattr(response, 'errors', None)
+                if isinstance(error_msg, list):
+                    error_msg = "; ".join(str(e) for e in error_msg)
+                logger.error(f"Paynow web payment failed: ref={reference}, error={error_msg}")
+                return {
+                    "success": False,
+                    "redirect_url": None,
+                    "poll_url": None,
+                    "error": str(error_msg) if error_msg else "Unknown error"
+                }
+        except Exception:
+            logger.exception("Paynow SDK raised an exception during web payment creation")
+            raise
 
     def create_mobile_payment(
         self,
@@ -173,32 +188,47 @@ class PaynowClient:
                 "error": "Email is required"
             }
 
-        payment = sdk.create_payment(reference, auth_email)
-        payment.add(item_name, amount)
-        response = sdk.send_mobile(payment, phone, method)
+        try:
+            payment = sdk.create_payment(reference, auth_email)
+            payment.add(item_name, amount)
+            response = sdk.send_mobile(payment, phone, method)
 
-        if response.success:
-            logger.info(f"Paynow mobile payment initiated: ref={reference}, phone={phone[:4]}***, method={method}")
-            return {
-                "success": True,
-                "redirect_url": None,
-                "poll_url": response.poll_url,
-                "instructions": response.instructions,
-                "error": None
-            }
-        else:
-            # Get error from response - try 'error' first, then fallback to 'errors'
-            error_msg = getattr(response, 'error', None) or getattr(response, 'errors', None)
-            if isinstance(error_msg, list):
-                error_msg = "; ".join(str(e) for e in error_msg)
-            logger.error(f"Paynow mobile payment failed: ref={reference}, error={error_msg}")
-            return {
-                "success": False,
-                "redirect_url": None,
-                "poll_url": None,
-                "instructions": None,
-                "error": str(error_msg) if error_msg else "Unknown error"
-            }
+            if response.success:
+                logger.info(f"Paynow mobile payment initiated: ref={reference}, phone={phone[:4]}***, method={method}")
+                return {
+                    "success": True,
+                    "redirect_url": None,
+                    "poll_url": response.poll_url,
+                    "instructions": response.instructions,
+                    "error": None
+                }
+            else:
+                # Comprehensive debugging to expose SDK response details
+                logger.error("=== Paynow Mobile Payment SDK Response Debug ===")
+                logger.error("SDK response type: %s", type(response))
+                logger.error("SDK response repr: %r", response)
+                logger.error("SDK response dict: %s", getattr(response, "__dict__", None))
+                logger.error("SDK success: %s", getattr(response, "success", None))
+                logger.error("SDK errors: %r", getattr(response, "errors", None))
+                logger.error("SDK error: %r", getattr(response, "error", None))
+                logger.error("SDK raw: %r", response)
+                logger.error("=== End SDK Debug ===")
+
+                # Get error from response - try 'error' first, then fallback to 'errors'
+                error_msg = getattr(response, 'error', None) or getattr(response, 'errors', None)
+                if isinstance(error_msg, list):
+                    error_msg = "; ".join(str(e) for e in error_msg)
+                logger.error(f"Paynow mobile payment failed: ref={reference}, error={error_msg}")
+                return {
+                    "success": False,
+                    "redirect_url": None,
+                    "poll_url": None,
+                    "instructions": None,
+                    "error": str(error_msg) if error_msg else "Unknown error"
+                }
+        except Exception:
+            logger.exception("Paynow SDK raised an exception during mobile payment creation")
+            raise
 
     def check_transaction_status(self, poll_url: str) -> Dict[str, Any]:
         """
