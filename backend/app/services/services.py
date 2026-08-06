@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.models.models import (
     User, Event, Participant, Payment, AuditLog, VoteTransaction,
-    PaymentMethodConfig, TestPayment
+    PaymentMethodConfig
 )
 from app.enums.enums import (
     UserRole, EventStatus, ContestantStatus, PaymentStatus
@@ -18,7 +18,7 @@ from app.repositories.repositories import (
     UserRepository, EventRepository, ParticipantRepository,
     PaymentRepository, ActivityRepository,
     SettingsRepository, VoteTransactionRepository,
-    PaymentMethodConfigRepository, TestPaymentRepository
+    PaymentMethodConfigRepository
 )
 from app.utils.email import PreparedEmail
 from app.core.security import hash_password, verify_password, create_access_token, create_refresh_token
@@ -1053,14 +1053,13 @@ class PaymentService:
         self.db = db
         self.user_id = user_id
         self.payment_repo = PaymentRepository(db)
-        self.test_payment_repo = TestPaymentRepository(db)
         self.part_repo = ParticipantRepository(db)
         self.vote_repo = VoteTransactionRepository(db)
         self.event_repo = EventRepository(db)
         self.paynow_client = PaynowClient()
         self.fraud_service = FraudDetectionService(db)
         self.idempotency_service = IdempotencyService(db)
-        self.test_mode = settings.TEST_PAYMENT_MODE  # Use specific test payment mode setting
+        self.test_mode = settings.TEST_PAYMENT_MODE  # Use sandbox when true, production when false
 
     def check_voter_duplicate(
         self, phone: str, event_id: Optional[str] = None
@@ -1245,105 +1244,35 @@ class PaymentService:
         # 6. Generate reference
         reference = f"VOTE-{uuid.uuid4().hex[:8].upper()}"
 
-        # 7. TEST MODE: Create test payment without Paynow
-        if self.test_mode:
-            return self._initiate_test_payment(
-                payment_in, part, reference, vote_price, evt_id, idempotency_key
-            )
-
-        # 8. Fraud detection before contacting Paynow
+        # 7. Fraud detection before contacting Paynow
         # Calculate estimated votes and run fraud detection
         estimated_votes = calculate_votes_from_amount(payment_amount, vote_price)
         self.fraud_service.detect_suspicious_voting(part.id, estimated_votes)
 
-        # 9. TEST MODE: Create test payment without Paynow
-        if self.test_mode:
-            return self._initiate_test_payment(
-                payment_in, part, reference, vote_price, evt_id, idempotency_key
-            )
-
-        # 10. PRODUCTION MODE: Continue with real Paynow flow
-        return self._initiate_real_payment(
+        # 8. Initiate payment via Paynow (Sandbox or Production based on TEST_PAYMENT_MODE)
+        # PaynowClient handles credential selection internally
+        return self._initiate_payment(
             payment_in, part, reference, vote_price, evt_id, idempotency_key
         )
 
-    def _initiate_test_payment(
-        self, payment_in: PaymentCreate, part: Participant, 
-        reference: str, vote_price: Decimal, evt_id: Optional[str],
-        idempotency_key: Optional[str]
-    ) -> PaymentInitiationResponse:
-        """
-        Create a test payment without calling Paynow SDK.
-        Used in development mode for testing payment flows without real money.
-        """
-        test_redirect_url = f"{settings.FRONTEND_URL}/payments/test/{reference}"
-        
-        # Use the actual payment amount from the request
-        payment_amount = Decimal(str(payment_in.amount))
-        
-        test_payment = TestPayment(
-            reference=reference,
-            contestant_id=part.id,
-            amount=payment_amount,
-            payment_method=payment_in.payment_method,
-            status="created",
-            voter_phone=payment_in.voter_phone,
-            voter_name=payment_in.voter_name,
-            voter_email=payment_in.voter_email,
-            event_id=evt_id,
-            test_redirect_url=test_redirect_url,
-            is_test_payment=True,
-            auto_complete=True,  # Auto-complete test payments after delay
-            test_completion_delay=5,  # Complete after 5 seconds
-            test_response_data={
-                "test_mode": True,
-                "simulated": True,
-                "vote_price": str(vote_price)
-            }
-        )
-        
-        self.test_payment_repo.create(test_payment)
-        
-        logger.info(f"Test payment created: {reference} for contestant {part.name} (${vote_price})")
-        
-        # Log test payment initiation
-        AuditService.log_action(
-            db=self.db,
-            action="Test Payment Created",
-            user_id=self.user_id,
-            details=f"TEST MODE: Payment {reference} for contestant {part.name} (${vote_price})"
-        )
-        
-        return PaymentInitiationResponse(
-            id=test_payment.id,
-            reference=test_payment.reference,
-            redirect_url=test_payment.test_redirect_url,  # Fixed: TestPayment uses test_redirect_url
-            poll_url=None,  # Fixed: TestPayment does not have poll_url
-            amount=str(test_payment.amount),
-            payment_method=test_payment.payment_method,
-            status=test_payment.status,
-            contestant_id=test_payment.contestant_id,
-            voter_name=None,  # For consistency with real payment response
-            voter_email=test_payment.voter_email,
-            created_at=test_payment.created_at,
-            test_mode=True,
-        )
-    def _initiate_real_payment(
+    def _initiate_payment(
         self, payment_in: PaymentCreate, part: Participant,
         reference: str, vote_price: Decimal, evt_id: Optional[str],
         idempotency_key: Optional[str]
     ) -> PaymentInitiationResponse:
         """
-        Create a real payment using Paynow SDK.
-        Used in production mode for actual payment processing.
+        Create a payment using Paynow SDK.
+        
+        Uses sandbox credentials when TEST_PAYMENT_MODE=true, production credentials otherwise.
+        This ensures the test flow matches production exactly.
         """
-        # 10. Determine payment type (web vs mobile)
+        # Determine payment type (web vs mobile)
         is_mobile = payment_in.payment_method.lower() in ("ecocash", "onemoney")
 
-        # 11. Use the actual payment amount from the request
+        # Use the actual payment amount from the request
         payment_amount = Decimal(str(payment_in.amount))
 
-        # 12. Create local payment record with the actual amount
+        # Create local payment record with the actual amount
         pending_payment = Payment(
             reference=reference,
             contestant_id=part.id,
@@ -1430,7 +1359,7 @@ class PaymentService:
             voter_name=None,
             voter_email=payment_in.voter_email,
             created_at=pending_payment.created_at,
-            test_mode=False,
+            test_mode=self.test_mode,  # Reflect actual mode (sandbox vs production)
         )
 
     def process_paynow_callback(self, callback_data: Dict[str, Any]) -> None:
@@ -1617,10 +1546,30 @@ class PaymentService:
 
         # If already in a final state, return immediately
         if payment.status in (PaymentStatus.PAID, PaymentStatus.FAILED, PaymentStatus.CANCELLED, PaymentStatus.REFUNDED, PaymentStatus.EXPIRED):
+            # Fetch contestant details for successful payments
+            contestant_name = None
+            votes_awarded = None
+            current_total_votes = None
+            
+            if payment.contestant_id and payment.status == PaymentStatus.PAID:
+                contestant = self.part_repo.get_by_id(payment.contestant_id)
+                if contestant:
+                    contestant_name = contestant.name
+                    current_total_votes = contestant.votes
+                    # Get votes awarded from vote transaction
+                    vote_txn = self.vote_repo.get_by_payment_id(payment.id)
+                    if vote_txn:
+                        votes_awarded = vote_txn.votes_awarded
+            
             return PaymentStatusCheckResponse(
                 reference=reference,
                 status=payment.status,
-                paid=(payment.status == PaymentStatus.PAID)
+                paid=(payment.status == PaymentStatus.PAID),
+                contestant_id=payment.contestant_id,
+                contestant_name=contestant_name,
+                amount=str(payment.amount) if payment.amount else None,
+                votes_awarded=votes_awarded,
+                current_total_votes=current_total_votes
             )
 
         # Try to actively check via poll_url
@@ -1666,6 +1615,15 @@ class PaymentService:
 
                         self.db.commit()
                         logger.info(f"Manual poll confirmed PAID for ref: {reference}")
+                        
+                        # Fetch contestant details for response
+                        contestant_name = None
+                        current_total_votes = None
+                        if payment.contestant_id:
+                            contestant = self.part_repo.get_by_id(payment.contestant_id)
+                            if contestant:
+                                contestant_name = contestant.name
+                                current_total_votes = contestant.votes
                     except Exception:
                         self.db.rollback()
                         raise
@@ -1673,7 +1631,12 @@ class PaymentService:
                     return PaymentStatusCheckResponse(
                         reference=reference,
                         status=PaymentStatus.PAID,
-                        paid=True
+                        paid=True,
+                        contestant_id=payment.contestant_id,
+                        contestant_name=contestant_name,
+                        amount=str(payment.amount) if payment.amount else None,
+                        votes_awarded=votes_to_add,
+                        current_total_votes=current_total_votes
                     )
             except Exception as e:
                 logger.warning(f"Manual status check failed for {reference}: {str(e)}")

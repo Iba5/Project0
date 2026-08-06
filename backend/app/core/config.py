@@ -77,6 +77,10 @@ class Settings(BaseSettings):
     PAYNOW_INTEGRATION_KEY: str = os.getenv("PAYNOW_INTEGRATION_KEY", "")
     PAYNOW_RESULT_URL: str = os.getenv("PAYNOW_RESULT_URL", "")
     PAYNOW_RETURN_URL: str = os.getenv("PAYNOW_RETURN_URL", "")
+    
+    # Paynow Sandbox (for testing without real money)
+    PAYNOW_SANDBOX_INTEGRATION_ID: str = os.getenv("PAYNOW_SANDBOX_INTEGRATION_ID", "")
+    PAYNOW_SANDBOX_INTEGRATION_KEY: str = os.getenv("PAYNOW_SANDBOX_INTEGRATION_KEY", "")
 
     # Email Configuration (Resend HTTPS API — Railway blocks raw SMTP ports)
     RESEND_API_KEY: str = os.getenv("RESEND_API_KEY", "")

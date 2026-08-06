@@ -499,7 +499,7 @@ export default function PaymentView({ participantId }: { participantId: string }
       setCompletedSteps([1, 2, 3, 4])
 
       toast.success('Payment initiated successfully!', {
-        description: `Complete payment in the Paynow window. Reference: ${result.payment.reference}`,
+        description: `Complete payment in the Paynow window. You'll be redirected here after payment. Reference: ${result.payment.reference}`,
       })
     } catch (err) {
       toast.error('Payment failed', {

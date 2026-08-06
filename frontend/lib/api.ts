@@ -604,7 +604,20 @@ export async function compareParticipants(ids: string[]): Promise<unknown> {
 
 // ─── Payment Status Check ───────────────────────────────────────
 
-export async function checkPaymentStatus(reference: string): Promise<unknown> {
+export type PaymentStatus = 'pending' | 'paid' | 'failed' | 'cancelled' | 'refunded' | 'expired' | 'created'
+
+export interface PaymentStatusData {
+  reference: string
+  status: PaymentStatus
+  paid: boolean
+  contestant_id?: string
+  contestant_name?: string
+  amount?: string
+  votes_awarded?: number
+  current_total_votes?: number
+}
+
+export async function checkPaymentStatus(reference: string): Promise<PaymentStatusData> {
   return apiFetch(`/payments/check-status/${encodeURIComponent(reference)}`)
 }
 

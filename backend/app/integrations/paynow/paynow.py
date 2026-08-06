@@ -15,10 +15,20 @@ class PaynowClient:
     Integrates with Paynow Zimbabwe using the official Python SDK.
     Handles payment creation, sending, mobile checkout, and status polling.
     Falls back to manual signature verification for webhook validation.
+    
+    Supports both sandbox (for testing) and production modes based on TEST_PAYMENT_MODE.
     """
     def __init__(self) -> None:
-        self.integration_id = settings.PAYNOW_INTEGRATION_ID
-        self.integration_key = settings.PAYNOW_INTEGRATION_KEY
+        # Select sandbox or production credentials based on TEST_PAYMENT_MODE
+        if settings.TEST_PAYMENT_MODE:
+            self.integration_id = settings.PAYNOW_SANDBOX_INTEGRATION_ID or settings.PAYNOW_INTEGRATION_ID
+            self.integration_key = settings.PAYNOW_SANDBOX_INTEGRATION_KEY or settings.PAYNOW_INTEGRATION_KEY
+            logger.info("PaynowClient initialized in SANDBOX mode")
+        else:
+            self.integration_id = settings.PAYNOW_INTEGRATION_ID
+            self.integration_key = settings.PAYNOW_INTEGRATION_KEY
+            logger.info("PaynowClient initialized in PRODUCTION mode")
+        
         self.result_url = settings.PAYNOW_RESULT_URL
         self.return_url = settings.PAYNOW_RETURN_URL
         self._paynow = None

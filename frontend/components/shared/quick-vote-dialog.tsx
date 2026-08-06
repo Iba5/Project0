@@ -128,6 +128,8 @@ export function QuickVoteDialog({
         onOpenChange(false)
         onVoted?.()
       }, 1100)
+      console.log("PAYMENT RESULT", result)
+      console.log("Redirect URL", result.payment.paynowRedirectUrl)
     } catch (err) {
       toast.error('Quick Vote failed', {
         description: err instanceof Error ? err.message : 'Please try again',

@@ -318,6 +318,11 @@ class PaymentStatusCheckResponse(CamelModel):
     reference: str
     status: PaymentStatus
     paid: bool
+    contestant_id: Optional[str] = None
+    contestant_name: Optional[str] = None
+    amount: Optional[str] = None
+    votes_awarded: Optional[int] = None
+    current_total_votes: Optional[int] = None
 
 
 class CallbackAckResponse(CamelModel):
@@ -340,46 +345,6 @@ class PaymentListResponse(BaseModel):
     pagination: PaginationMeta
 
 
-
-class TestPaymentItemResponse(CamelModel):
-    """Single test-payment record returned by the dev list endpoint."""
-    reference: str
-    contestant_id: Optional[str] = None
-    amount: str
-    payment_method: str
-    status: str
-    voter_phone: Optional[str] = None
-    voter_name: Optional[str] = None
-    voter_email: Optional[str] = None
-    event_id: Optional[str] = None
-    test_redirect_url: Optional[str] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    auto_complete: bool = True
-    test_completion_delay: int = 5
-
-
-class TestPaymentListResponse(CamelModel):
-    """Response envelope for GET /payments/test/list."""
-    test_payments: List[TestPaymentItemResponse]
-    total: int
-
-
-class TestPaymentCompleteResponse(CamelModel):
-    """Response for POST /payments/test/{reference}/complete."""
-    status: str
-    reference: str
-    contestant_name: str
-    amount: str
-    votes_awarded: int
-    test_mode: bool = True
-
-
-class TestPaymentCleanupResponse(CamelModel):
-    """Response for DELETE /payments/test/cleanup."""
-    status: str
-    deleted_count: int
-    message: str
 
 # --- Vote Transaction Schemas ---
 
