@@ -649,7 +649,8 @@ class EventService:
             start_date=event_in.start_date,
             end_date=event_in.end_date,
             status=event_in.status,
-            vote_price=event_in.vote_price,
+            vote_price=Decimal(str(event_in.vote_price)) if event_in.vote_price else None,
+            minimum_payment=Decimal(str(event_in.minimum_payment)) if event_in.minimum_payment else None,
             votes_per_payment=event_in.votes_per_payment,
             currency=event_in.currency,
             registration_opens=event_in.registration_opens,
@@ -701,7 +702,12 @@ class EventService:
         # L9 FIX: Only update fields that were actually provided (partial update)
         update_data = event_in.model_dump(exclude_unset=True)
         for field, value in update_data.items():
-            setattr(event, field, value)
+            if field == 'vote_price' and value is not None:
+                setattr(event, field, Decimal(str(value)))
+            elif field == 'minimum_payment' and value is not None:
+                setattr(event, field, Decimal(str(value)))
+            else:
+                setattr(event, field, value)
 
         self.event_repo.update()
 
@@ -802,6 +808,7 @@ class ParticipantService:
         self.db = db
         self.user_id = user_id
         self.part_repo = ParticipantRepository(db)
+        self.event_repo = EventRepository(db)
 
     def list_participants(
         self, search: Optional[str] = None, status: Optional[ContestantStatus] = None,
@@ -860,6 +867,34 @@ class ParticipantService:
         part = self.part_repo.get_by_id(part_id)
         if not part:
             raise NotFoundException("Participant not found")
+        
+        # Populate event payment configuration if participant has an event
+        if part.event_id:
+            from app.utils.event_utils import get_computed_event_status
+            from app.schemas.schemas import PaymentConfiguration
+            event = self.event_repo.get_by_id(part.event_id)
+            if event:
+                # Create consolidated payment configuration object
+                payment_config = PaymentConfiguration(
+                    vote_price=float(event.vote_price) if event.vote_price else None,
+                    minimum_payment=float(event.minimum_payment) if event.minimum_payment else None,
+                    currency=event.currency or "USD",
+                    voting_open=get_computed_event_status(
+                        event.status,
+                        event.start_date,
+                        event.end_date,
+                        event.registration_opens,
+                        event.registration_closes,
+                        event.voting_opens,
+                        event.voting_closes,
+                    ) == "voting_open"
+                )
+                setattr(part, 'payment_configuration', payment_config)
+            else:
+                setattr(part, 'payment_configuration', None)
+        else:
+            setattr(part, 'payment_configuration', None)
+        
         return part
 
     def create_participant(self, part_in: ParticipantCreate) -> Participant:
@@ -1121,27 +1156,44 @@ class PaymentService:
         if not payment_method_config or not payment_method_config.is_enabled:
             raise PaymentException(f"Payment method '{payment_in.payment_method}' is not available or has been disabled.")
 
-        # 1e. Validate amount against event minimum
+        # 1e. Resolve vote price and minimum payment using centralized helpers
+        from app.utils.payment_utils import resolve_vote_price, resolve_minimum_payment, calculate_votes_from_amount
         evt_id = payment_in.event_id
-        vote_price = None
+        event_vote_price = None
+        event_minimum_payment = None
         
-        # Get event vote price
+        # Get event configuration
         if hasattr(part, 'event_id') and part.event_id:
             event = self.event_repo.get_by_id(part.event_id)
-            if event and event.vote_price:
-                vote_price = event.vote_price
+            if event:
+                event_vote_price = event.vote_price
+                event_minimum_payment = event.minimum_payment
                 evt_id = part.event_id
         
-        if not vote_price:
-            vote_price = settings.MIN_PAYMENT_AMOUNT
-
-        vote_price = Decimal(str(vote_price))
+        vote_price = resolve_vote_price(event_vote_price)
+        minimum_payment = resolve_minimum_payment(event_minimum_payment)
         
-        # Ensure the amount meets the minimum requirement
-        payment_amount = Decimal(str(payment_in.amount))
-        if payment_amount < vote_price:
+        # Validate amount using floor(amount / votePrice) calculation
+        payment_amount = payment_in.amount  # Already Decimal from schema
+        
+        # Check global minimum (hard safety floor)
+        if payment_amount < Decimal(str(settings.MIN_PAYMENT_AMOUNT)):
             raise PaymentException(
-                f"Minimum payment amount is ${vote_price:.2f}. Please increase your contribution."
+                f"Minimum payment amount is ${settings.MIN_PAYMENT_AMOUNT:.2f}. Please increase your contribution."
+            )
+        
+        # Check event-specific minimum payment
+        if payment_amount < minimum_payment:
+            raise PaymentException(
+                f"Minimum payment amount is ${minimum_payment:.2f}. Please increase your contribution."
+            )
+        
+        # Check that amount purchases at least one vote
+        estimated_votes = calculate_votes_from_amount(payment_amount, vote_price)
+        if estimated_votes < 1:
+            raise PaymentException(
+                f"Your contribution of ${payment_amount:.2f} is insufficient to purchase any votes. "
+                f"Minimum amount is ${vote_price:.2f} for one vote."
             )
 
         # 2. Duplicate voter check
@@ -1199,7 +1251,18 @@ class PaymentService:
                 payment_in, part, reference, vote_price, evt_id, idempotency_key
             )
 
-        # 8. PRODUCTION MODE: Continue with real Paynow flow
+        # 8. Fraud detection before contacting Paynow
+        # Calculate estimated votes and run fraud detection
+        estimated_votes = calculate_votes_from_amount(payment_amount, vote_price)
+        self.fraud_service.detect_suspicious_voting(part.id, estimated_votes)
+
+        # 9. TEST MODE: Create test payment without Paynow
+        if self.test_mode:
+            return self._initiate_test_payment(
+                payment_in, part, reference, vote_price, evt_id, idempotency_key
+            )
+
+        # 10. PRODUCTION MODE: Continue with real Paynow flow
         return self._initiate_real_payment(
             payment_in, part, reference, vote_price, evt_id, idempotency_key
         )
@@ -1225,6 +1288,7 @@ class PaymentService:
             payment_method=payment_in.payment_method,
             status="created",
             voter_phone=payment_in.voter_phone,
+            voter_name=payment_in.voter_name,
             voter_email=payment_in.voter_email,
             event_id=evt_id,
             test_redirect_url=test_redirect_url,
@@ -1259,7 +1323,7 @@ class PaymentService:
             payment_method=test_payment.payment_method,
             status=test_payment.status,
             contestant_id=test_payment.contestant_id,
-            voter_name=test_payment.voter_name,
+            voter_name=None,  # For consistency with real payment response
             voter_email=test_payment.voter_email,
             created_at=test_payment.created_at,
             test_mode=True,
@@ -1287,6 +1351,7 @@ class PaymentService:
             payment_method=payment_in.payment_method,
             status=PaymentStatus.CREATED,
             voter_phone=payment_in.voter_phone,
+            voter_name=payment_in.voter_name,
             voter_email=payment_in.voter_email,
             event_id=evt_id,
             duplicate_vote_acknowledged=payment_in.acknowledge_duplicate,
@@ -1315,7 +1380,7 @@ class PaymentService:
                     reference=reference,
                     email=voter_email,
                     item_name=item_name,
-                    amount=vote_price,
+                    amount=payment_amount,
                 )
         except ImportError:
             # H4 FIX: Paynow SDK not installed — FAIL loudly, don't fake success.
@@ -1358,7 +1423,7 @@ class PaymentService:
             reference=pending_payment.reference,
             redirect_url=paynow_response.get("redirect_url"),
             poll_url=paynow_response.get("poll_url"),
-            amount=str(vote_price),
+            amount=str(payment_amount),
             payment_method=payment_in.payment_method,
             status=pending_payment.status,
             contestant_id=part.id,
@@ -1440,21 +1505,24 @@ class PaymentService:
             # Reference: https://developers.paynow.co.zw/docs/paynow/status_update/
             normalized_status = str(paynow_status).lower() if paynow_status else ""
             if normalized_status in ("paid", "successful", "awaiting delivery", "delivered"):
-                # H3 FIX: Compute votes_to_add BEFORE fraud check.
-                # Previously used int(payment.amount) — a monetary value —
-                # compared against MAX_VOTES_PER_TRANSACTION.
-                votes_to_add = 1
+                # Calculate votes using centralized helper: floor(amount / votePrice)
+                from app.utils.payment_utils import resolve_vote_price, calculate_votes_from_amount
+                
+                event_vote_price = None
                 if payment.event_id:
                     event = self.event_repo.get_by_id(payment.event_id)
                     if event:
-                        votes_to_add = event.votes_per_payment or 1
+                        event_vote_price = event.vote_price
+                
+                vote_price = resolve_vote_price(event_vote_price)
+                votes_to_add = calculate_votes_from_amount(payment.amount, vote_price)
 
                 if not payment.contestant_id:
                     raise VotingException(
                         f"Payment {reference} has no associated contestant; cannot credit votes."
                     )
 
-                # Fraud detection — now uses correct vote count
+                # Fraud detection — uses calculated votes from actual amount
                 self.fraud_service.detect_suspicious_voting(payment.contestant_id, votes_to_add)
 
                 # Update payment status
@@ -1562,11 +1630,17 @@ class PaymentService:
                 if poll_result.get("paid"):
                     # Directly apply the vote in this transaction (skip webhook signature)
                     try:
-                        votes_to_add = 1
+                        # Calculate votes using centralized helper: floor(amount / votePrice)
+                        from app.utils.payment_utils import resolve_vote_price, calculate_votes_from_amount
+                        
+                        event_vote_price = None
                         if payment.event_id:
                             event = self.event_repo.get_by_id(payment.event_id)
                             if event:
-                                votes_to_add = event.votes_per_payment or 1  # Fixed: Null safety fallback
+                                event_vote_price = event.vote_price
+                        
+                        vote_price = resolve_vote_price(event_vote_price)
+                        votes_to_add = calculate_votes_from_amount(payment.amount, vote_price)
 
                         payment.status = PaymentStatus.PAID
 

@@ -118,6 +118,7 @@ class EventBase(CamelModel):
 
     # Configurations
     vote_price: float = 1.0
+    minimum_payment: float = 1.0  # Independent minimum payment
     votes_per_payment: int = 1
     currency: str = "USD"
     registration_opens: Optional[datetime] = None
@@ -141,6 +142,7 @@ class EventUpdate(CamelModel):
     end_date: Optional[datetime] = None
     status: Optional[EventStatus] = None
     vote_price: Optional[float] = None
+    minimum_payment: Optional[float] = None  # Independent minimum payment
     votes_per_payment: Optional[int] = None
     currency: Optional[str] = None
     registration_opens: Optional[datetime] = None
@@ -159,6 +161,7 @@ class EventResponse(EventBase):
     created_at: Optional[datetime] = None
     deleted_at: Optional[datetime] = None
     participant_count: Optional[int] = None
+    minimum_payment: Optional[float] = None  # Include minimum_payment in response
 
 # --- Participant / Contestant Schemas ---
 
@@ -181,12 +184,21 @@ class ParticipantBase(CamelModel):
 class ParticipantCreate(ParticipantBase):
     event_id: str  # Required: every new participant must belong to an event
 
+class PaymentConfiguration(CamelModel):
+    """Consolidated payment configuration from event."""
+    vote_price: Optional[float] = None
+    minimum_payment: Optional[float] = None
+    currency: Optional[str] = None
+    voting_open: Optional[bool] = None
+
 class ParticipantResponse(ParticipantBase):
     id: str
     event_id: Optional[str] = None  # Optional: ORM rows may have NULL event_id
     thumbnail_url: Optional[str] = None
     created_at: Optional[datetime] = None
     deleted_at: Optional[datetime] = None
+    # Consolidated payment configuration from participant's event
+    payment_configuration: Optional[PaymentConfiguration] = None
 
 class ParticipantUpdate(CamelModel):
     name: Optional[str] = None
@@ -227,9 +239,10 @@ class PaymentEnvelopeResponse(CamelModel):
 
 class PaymentCreate(CamelModel):
     contestant_id: str
-    amount: float = Field(..., gt=0, description="Payment amount in currency units")
+    amount: Decimal = Field(..., gt=0, description="Payment amount in currency units")
     payment_method: str
     voter_phone: str = Field(..., min_length=8, max_length=15, description="Voter phone number (required)")
+    voter_name: Optional[str] = None  # Name of actual voter (if proxy)
     voter_email: Optional[str] = None
     event_id: Optional[str] = None
     acknowledge_duplicate: bool = False
@@ -242,15 +255,6 @@ class PaymentCreate(CamelModel):
         if not cleaned.isdigit() or len(cleaned) < 8:
             raise ValueError("Invalid phone number format")
         return cleaned
-
-class PaymentConfigurationResponse(CamelModel):
-    """Payment configuration for a contestant's event."""
-    minimum_payment: float = Field(..., description="Minimum payment amount")
-    vote_price: float = Field(..., description="Cost per vote")
-    currency: str = Field(default="USD", description="Currency code")
-    event_name: Optional[str] = Field(None, description="Event name")
-    voting_open: bool = Field(..., description="Whether voting is currently open")
-    event_id: Optional[str] = Field(None, description="Event ID")
 
 class PaymentResponse(CamelModel):
     id: str
@@ -288,6 +292,7 @@ class PaymentInitiationResponse(CamelModel):
 
     idempotent: bool = False
     test_mode: bool = False
+    votes_awarded: Optional[int] = None  # Backend-calculated votes from amount
 
 
 class SimpleMessageResponse(CamelModel):
@@ -344,6 +349,7 @@ class TestPaymentItemResponse(CamelModel):
     payment_method: str
     status: str
     voter_phone: Optional[str] = None
+    voter_name: Optional[str] = None
     voter_email: Optional[str] = None
     event_id: Optional[str] = None
     test_redirect_url: Optional[str] = None

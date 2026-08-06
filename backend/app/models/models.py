@@ -73,6 +73,7 @@ class Event(Base):
 
     # C5 FIX: Numeric for monetary values
     vote_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2), default=Decimal("1.00"))
+    minimum_payment: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2), default=Decimal("1.00"))  # Independent minimum payment
     votes_per_payment: Mapped[Optional[int]] = mapped_column(Integer, default=1)
     currency: Mapped[Optional[str]] = mapped_column(String, default="USD")
     registration_opens: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -254,8 +255,12 @@ class TestPayment(Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     payment_method: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, default="created", nullable=False)
+    
+    # Voter identification (mirrors Payment model)
     voter_phone: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    voter_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # Name of actual voter (if proxy)
     voter_email: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    
     event_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     test_redirect_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     is_test_payment: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

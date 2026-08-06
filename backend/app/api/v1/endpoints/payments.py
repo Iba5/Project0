@@ -287,17 +287,27 @@ def complete_test_payment(
     db.add(real_payment)
     db.flush()
     
+    # Calculate votes using centralized helper
+    from app.utils.payment_utils import resolve_vote_price, calculate_votes_from_amount
+    from app.repositories.repositories import EventRepository
+    
+    event_repo = EventRepository(db)
+    event = event_repo.get_by_id(test_payment.event_id) if test_payment.event_id else None
+    event_vote_price = event.vote_price if event else None
+    vote_price = resolve_vote_price(event_vote_price)
+    votes_awarded = calculate_votes_from_amount(test_payment.amount, vote_price)
+    
     # Create vote transaction
     vote_transaction = VoteTransaction(
         payment_id=real_payment.id,
         contestant_id=test_payment.contestant_id,
-        votes_awarded=1,  # Default 1 vote per payment
+        votes_awarded=votes_awarded,
         event_id=test_payment.event_id
     )
     db.add(vote_transaction)
     
     # Increment contestant votes
-    contestant.votes += 1
+    contestant.votes += votes_awarded
     
     # Update test payment status
     test_payment.status = "completed"
@@ -319,7 +329,7 @@ def complete_test_payment(
         reference=reference,
         contestant_name=contestant.name,
         amount=str(test_payment.amount),
-        votes_awarded=1,
+        votes_awarded=votes_awarded,
         test_mode=True,
     )
 
@@ -358,6 +368,7 @@ def list_test_payments(
             payment_method=tp.payment_method,
             status=tp.status,
             voter_phone=tp.voter_phone,
+            voter_name=tp.voter_name,
             voter_email=tp.voter_email,
             event_id=tp.event_id,
             test_redirect_url=tp.test_redirect_url,

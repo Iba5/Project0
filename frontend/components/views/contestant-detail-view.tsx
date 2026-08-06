@@ -878,7 +878,12 @@ export default function ContestantDetailView({ participantId }: { participantId:
       <QuickVoteDialog
         open={quickVoteOpen}
         onOpenChange={setQuickVoteOpen}
-        participant={participant ? { id: participant.id, name: participant.name, category: participant.category } : null}
+        participant={participant ? { 
+          id: participant.id, 
+          name: participant.name, 
+          category: participant.category,
+          paymentConfiguration: participant.paymentConfiguration 
+        } : null}
         onVoted={handleQuickVoteSuccess}
       />
 

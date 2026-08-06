@@ -31,7 +31,6 @@ import {
   getPublicParticipant,
   initiatePayment,
   getPaymentMethods,
-  getPaymentConfiguration,
   paymentMethods as fallbackPaymentMethods,
   type PaymentMethod,
 } from '@/lib/api'
@@ -48,10 +47,10 @@ const STEPS = [
 
 
 
-// Vote calculator: votes = amount / vote_price (rounded down)
-function calculateVotes(amount: number, votePrice: number): number {
-  if (votePrice <= 0) return Math.max(1, Math.round(amount))
-  return Math.max(1, Math.floor(amount / votePrice))
+// Vote calculator: votes = amount / vote_price (rounded down) - UX ONLY
+function calculateVotes(amount: number, votePrice: number | undefined): number {
+  if (!votePrice || votePrice <= 0) return 0
+  return Math.floor(amount / votePrice)
 }
 
 // ─── Step indicator component ─────────────────────────────────────
@@ -246,7 +245,7 @@ function RecentSupporters({ participantId }: { participantId: string | null }) {
 }
 
 // ─── Vote Calculator ──────────────────────────────────────────────
-function VoteCalculator({ amount, votePrice }: { amount: number; votePrice: number }) {
+function VoteCalculator({ amount, votePrice }: { amount: number; votePrice: number | undefined }) {
   const votes = calculateVotes(amount, votePrice)
   return (
     <motion.div
@@ -270,12 +269,16 @@ function VoteCalculator({ amount, votePrice }: { amount: number; votePrice: numb
           </span>
         </div>
         <div className="text-right">
-          <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
-            ${votePrice.toFixed(2)} = 1 vote
-          </div>
-          <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
-            Total: ${amount.toFixed(2)}
-          </div>
+          {votePrice && (
+            <>
+              <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                ${votePrice.toFixed(2)} = 1 vote
+              </div>
+              <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                Total: ${amount.toFixed(2)}
+              </div>
+            </>
+          )}
         </div>
       </div>
       {/* Visual vote bar */}
@@ -314,12 +317,10 @@ export default function PaymentView({ participantId }: { participantId: string }
   const [participantName, setParticipantName] = useState<string>('')
   const [participantCategory, setParticipantCategory] = useState<string>('')
   const [paymentConfig, setPaymentConfig] = useState<{
-    minimumPayment: number
     votePrice: number
+    minimumPayment: number
     currency: string
-    eventName: string | null
     votingOpen: boolean
-    eventId: string | null
   } | null>(null)
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>(fallbackPaymentMethods)
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod | null>(null)
@@ -327,7 +328,7 @@ export default function PaymentView({ participantId }: { participantId: string }
   const [voterName, setVoterName] = useState('')
   const [voterEmail, setVoterEmail] = useState('')
   const [processing, setProcessing] = useState(false)
-  const [success, setSuccess] = useState(false)
+  const [paymentInitiated, setPaymentInitiated] = useState(false)
 
   // Step management
   const [currentStep, setCurrentStep] = useState(1)
@@ -344,7 +345,7 @@ export default function PaymentView({ participantId }: { participantId: string }
 
   // No voter auth required — voter info fields are optional for receipt purposes
 
-  // Load participant data and payment configuration
+  // Load participant data and payment configuration from participant's event
   useEffect(() => {
     async function loadParticipant() {
       if (!paymentParticipantId) return
@@ -353,13 +354,19 @@ export default function PaymentView({ participantId }: { participantId: string }
         setParticipantName(data.name)
         setParticipantCategory(data.category)
 
-        // Load payment configuration from backend
-        const config = await getPaymentConfiguration(paymentParticipantId)
-        setPaymentConfig(config)
+        // Load payment configuration from participant's event data
+        if (data.paymentConfiguration) {
+          setPaymentConfig({
+            votePrice: data.paymentConfiguration.votePrice,
+            minimumPayment: data.paymentConfiguration.minimumPayment,
+            currency: data.paymentConfiguration.currency,
+            votingOpen: data.paymentConfiguration.votingOpen,
+          })
 
-        // Check if voting is open
-        if (!config.votingOpen) {
-          toast.error('Voting is currently closed for this event')
+          // Check if voting is open
+          if (!data.paymentConfiguration.votingOpen) {
+            toast.error('Voting is currently closed for this event')
+          }
         }
       } catch {
         setParticipantName('Contestant')
@@ -421,7 +428,7 @@ export default function PaymentView({ participantId }: { participantId: string }
   // Validate phone
   const validatePhone = useCallback((phone: string) => {
     if (!phone.trim()) {
-      setPhoneError('Phone number is required for mobile money')
+      setPhoneError('Phone number is required')
       return false
     }
     const cleaned = phone.replace(/[\s+]/g, '')
@@ -445,8 +452,8 @@ export default function PaymentView({ participantId }: { participantId: string }
   }
 
   const canProceedToStep2 = paymentParticipantId !== null
-  const canProceedToStep3 = paymentConfig !== null && effectiveAmount >= paymentConfig.minimumPayment
-  const canProceedToStep4 = selectedMethod !== null
+  const canProceedToStep3 = paymentConfig !== null && effectiveAmount >= paymentConfig.minimumPayment && paymentConfig.votingOpen
+  const canProceedToStep4 = selectedMethod !== null && phone.trim() !== '' && !phoneError
 
   const handleNextStep = () => {
     if (currentStep === 1 && canProceedToStep2) {
@@ -469,7 +476,7 @@ export default function PaymentView({ participantId }: { participantId: string }
     if (!selectedMethod || !paymentParticipantId) return
 
     // Validate inputs
-    if (selectedMethod.methodType === 'mobile' && !validatePhone(phone)) return
+    if (!validatePhone(phone)) return
     if (voterEmail && !validateEmail(voterEmail)) return
 
     setProcessing(true)
@@ -478,7 +485,7 @@ export default function PaymentView({ participantId }: { participantId: string }
         amount: effectiveAmount,
         paymentMethod: selectedMethod.method,
         contestantId: paymentParticipantId,
-        voterPhone: phone || undefined,
+        voterPhone: phone,
         voterName: voterName || undefined,
         voterEmail: voterEmail || undefined,
         idempotencyKey: idempotencyKey,
@@ -488,11 +495,11 @@ export default function PaymentView({ participantId }: { participantId: string }
         window.open(result.payment.paynowRedirectUrl, '_blank')
       }
 
-      setSuccess(true)
+      setPaymentInitiated(true)
       setCompletedSteps([1, 2, 3, 4])
 
       toast.success('Payment initiated successfully!', {
-        description: `Reference: ${result.payment.reference}`,
+        description: `Complete payment in the Paynow window. Reference: ${result.payment.reference}`,
       })
     } catch (err) {
       toast.error('Payment failed', {
@@ -516,8 +523,8 @@ export default function PaymentView({ participantId }: { participantId: string }
     }
   }
 
-  // ─── Success View ──────────────────────────────────────────────
-  if (success) {
+  // ─── Payment Initiated View ─────────────────────────────────────────────
+  if (paymentInitiated) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center px-4">
         <motion.div
@@ -525,16 +532,14 @@ export default function PaymentView({ participantId }: { participantId: string }
           animate={{ opacity: 1, scale: 1 }}
           className="relative text-center max-w-md"
         >
-          <ConfettiParticles />
-
           <motion.div
             initial={{ scale: 0 }}
             animate={{ scale: 1 }}
             transition={{ type: 'spring', stiffness: 200, damping: 15, delay: 0.2 }}
             className="w-24 h-24 rounded-full mx-auto mb-6 flex items-center justify-center"
             style={{
-              background: 'linear-gradient(135deg, rgba(34,197,94,0.2), rgba(34,197,94,0.05))',
-              boxShadow: '0 0 30px rgba(34,197,94,0.2)',
+              background: 'linear-gradient(135deg, rgba(245,158,11,0.2), rgba(217,119,6,0.05))',
+              boxShadow: '0 0 30px rgba(245,158,11,0.2)',
             }}
           >
             <motion.div
@@ -542,7 +547,7 @@ export default function PaymentView({ participantId }: { participantId: string }
               animate={{ scale: 1, rotate: 0 }}
               transition={{ delay: 0.4, type: 'spring', stiffness: 200 }}
             >
-              <CheckCircle2 className="size-12 text-green-500" />
+              <Loader2 className="size-12 text-amber-500 animate-spin" />
             </motion.div>
           </motion.div>
 
@@ -552,7 +557,7 @@ export default function PaymentView({ participantId }: { participantId: string }
             transition={{ delay: 0.5 }}
             className="text-2xl font-bold mb-2"
           >
-            Payment Successful!
+            Payment Initiated
           </motion.h2>
           <motion.p
             initial={{ opacity: 0, y: 10 }}
@@ -560,47 +565,47 @@ export default function PaymentView({ participantId }: { participantId: string }
             transition={{ delay: 0.6 }}
             className="text-muted-foreground mb-1"
           >
-            Your {paymentConfig ? calculateVotes(effectiveAmount, paymentConfig.votePrice) : calculateVotes(effectiveAmount, 1)} vote{paymentConfig ? calculateVotes(effectiveAmount, paymentConfig.votePrice) !== 1 ? 's' : '' : calculateVotes(effectiveAmount, 1) !== 1 ? 's' : ''} {paymentConfig ? calculateVotes(effectiveAmount, paymentConfig.votePrice) !== 1 ? 'have' : 'has' : calculateVotes(effectiveAmount, 1) !== 1 ? 'have' : 'has'} been unlocked.
+            Complete your payment in the Paynow window.
+          </motion.p>
+          <motion.p
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.7 }}
+            className="text-sm text-muted-foreground mb-6"
+          >
+            Your votes will be credited after successful payment.
           </motion.p>
           {participantName && (
             <motion.p
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.7 }}
+              transition={{ delay: 0.8 }}
               className="text-gold-400 font-medium mb-6"
             >
-              Vote for {participantName} now!
+              Supporting {participantName}
             </motion.p>
           )}
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.8 }}
+            transition={{ delay: 0.9 }}
             className="flex flex-col sm:flex-row gap-3 justify-center"
           >
-            <div className="relative group">
-              <div className="absolute -inset-1 bg-gradient-to-r from-gold-500 via-gold-400 to-gold-600 rounded-full blur-md opacity-50 group-hover:opacity-100 transition-opacity duration-500" />
-              <Button
-                onClick={() => {
-                  if (paymentParticipantId) {
-                    router.push(`/contestants/${paymentParticipantId}`)
-                  } else {
-                    router.push('/contestants')
-                  }
-                }}
-                className="relative bg-gold-500 hover:bg-gold-600 text-[#0B0F17] font-semibold rounded-full px-8 focus-ring-gold"
-              >
-                <Vote className="size-4 mr-1" />
-                Vote Now
-              </Button>
-            </div>
             <Button
-              onClick={handleShare}
-              variant="outline"
-              className="rounded-full border-gold-500/30 text-gold-400 hover:bg-gold-500/10"
+              onClick={() => {
+                if (paymentParticipantId) {
+                  router.push(`/contestants/${paymentParticipantId}`)
+                } else {
+                  router.push('/contestants')
+                }
+              }}
+              className="rounded-full h-12 font-semibold"
+              style={{
+                background: 'linear-gradient(135deg, #F59E0B, #D97706)',
+                color: '#0B0F17',
+              }}
             >
-              <Share2 className="size-4 mr-1" />
-              Share Support
+              Return to Contestant
             </Button>
             <Button
               onClick={() => router.push('/contestants')}
@@ -751,11 +756,13 @@ export default function PaymentView({ participantId }: { participantId: string }
                       }}
                     />
                   </div>
-                  <p className="text-xs text-muted-foreground mt-2">
-                    Minimum payment: {paymentConfig?.currency || '$'}{paymentConfig?.minimumPayment?.toFixed(2) || '0.00'}
-                  </p>
-                  {customAmount && parseFloat(customAmount) < (paymentConfig?.minimumPayment || 0) && (
-                    <p className="text-xs text-red-400 mt-1">Amount must be at least {paymentConfig?.currency || '$'}{paymentConfig?.minimumPayment?.toFixed(2) || '0.00'}</p>
+                  {paymentConfig && (
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Minimum payment: {paymentConfig.currency}{paymentConfig.minimumPayment.toFixed(2)}
+                    </p>
+                  )}
+                  {paymentConfig && customAmount && parseFloat(customAmount) < paymentConfig.minimumPayment && (
+                    <p className="text-xs text-red-400 mt-1">Amount must be at least {paymentConfig.currency}{paymentConfig.minimumPayment.toFixed(2)}</p>
                   )}
                 </div>
 
@@ -931,7 +938,7 @@ export default function PaymentView({ participantId }: { participantId: string }
                     <div className="flex justify-between text-sm">
                       <span style={{ color: 'var(--text-muted)' }}>Votes</span>
                       <span className="font-medium" style={{ color: '#F59E0B' }}>
-                        {calculateVotes(effectiveAmount, votePrice)} vote{calculateVotes(effectiveAmount, votePrice) !== 1 ? 's' : ''}
+                        {paymentConfig ? calculateVotes(effectiveAmount, paymentConfig.votePrice) : 0} vote{paymentConfig && calculateVotes(effectiveAmount, paymentConfig.votePrice) !== 1 ? 's' : ''}
                       </span>
                     </div>
                     <div className="flex justify-between text-sm">
@@ -993,40 +1000,34 @@ export default function PaymentView({ participantId }: { participantId: string }
                     />
                   </div>
 
-                  {selectedMethod?.methodType === 'mobile_money' && (
-                    <motion.div
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                    >
-                      <Label htmlFor="phone" className="text-sm font-medium mb-1.5 block">
-                        Phone Number <span className="text-red-400">*</span>
-                      </Label>
-                      <Input
-                        id="phone"
-                        type="tel"
-                        placeholder="+263 7XX XXX XXX"
-                        value={phone}
-                        onChange={(e) => {
-                          setPhone(e.target.value)
-                          if (phoneError) validatePhone(e.target.value)
-                        }}
-                        onBlur={() => {
-                          if (phone) validatePhone(phone)
-                        }}
-                        className="bg-surface border-border rounded-xl placeholder:text-muted-foreground/50"
-                        style={{
-                          borderColor: phoneError ? '#EF4444' : undefined,
-                        }}
-                      />
-                      {phoneError && (
-                        <p className="text-xs text-red-400 mt-1">{phoneError}</p>
-                      )}
-                      <p className="text-xs text-muted-foreground/60 mt-1">
-                        Enter the phone number linked to your {selectedMethod.displayName} account
-                      </p>
-                    </motion.div>
-                  )}
+                  <div>
+                    <Label htmlFor="phone" className="text-sm font-medium mb-1.5 block">
+                      Phone Number <span className="text-red-400">*</span>
+                    </Label>
+                    <Input
+                      id="phone"
+                      type="tel"
+                      placeholder="+263 7XX XXX XXX"
+                      value={phone}
+                      onChange={(e) => {
+                        setPhone(e.target.value)
+                        if (phoneError) validatePhone(e.target.value)
+                      }}
+                      onBlur={() => {
+                        if (phone) validatePhone(phone)
+                      }}
+                      className="bg-surface border-border rounded-xl placeholder:text-muted-foreground/50"
+                      style={{
+                        borderColor: phoneError ? '#EF4444' : undefined,
+                      }}
+                    />
+                    {phoneError && (
+                      <p className="text-xs text-red-400 mt-1">{phoneError}</p>
+                    )}
+                    <p className="text-xs text-muted-foreground/60 mt-1">
+                      Enter your phone number for payment verification
+                    </p>
+                  </div>
                 </div>
 
                 {/* Security Badge */}

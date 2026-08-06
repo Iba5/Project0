@@ -74,6 +74,13 @@ export type EventRecord = {
   eventId: string | null
 }
 
+export type PaymentConfiguration = {
+  votePrice: number
+  minimumPayment: number
+  currency: string
+  votingOpen: boolean
+}
+
 export type ParticipantRecord = {
   id: string
   name: string
@@ -85,6 +92,7 @@ export type ParticipantRecord = {
   status: ContestantStatus
   votes: number
   eventId: string
+  paymentConfiguration?: PaymentConfiguration
 }
 
 export type PaymentRecord = {

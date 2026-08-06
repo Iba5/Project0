@@ -299,6 +299,12 @@ export interface ParticipantItem {
   eventId: string | null
   createdAt: string
   deletedAt: string | null
+  paymentConfiguration?: {
+    votePrice: number
+    minimumPayment: number
+    currency: string
+    votingOpen: boolean
+  }
 }
 
 export interface ListParticipantsParams {
@@ -561,17 +567,6 @@ export async function initiatePayment(data: {
     method: 'POST',
     body: JSON.stringify(data),
   })
-}
-
-export async function getPaymentConfiguration(participantId: string): Promise<{
-  minimumPayment: number
-  votePrice: number
-  currency: string
-  eventName: string | null
-  votingOpen: boolean
-  eventId: string | null
-}> {
-  return apiFetch(`/public/participants/${participantId}/payment-config`)
 }
 
 // ─── Search ──────────────────────────────────────────────────────

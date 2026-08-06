@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Loader2, Sparkles, Zap, CheckCircle2 } from 'lucide-react'
+import { Loader2, Sparkles, Zap, CheckCircle2, DollarSign } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -21,12 +21,15 @@ interface QuickVoteDialogProps {
     id: string
     name: string
     category: string
+    paymentConfiguration?: {
+      votePrice: number
+      minimumPayment: number
+      currency: string
+      votingOpen: boolean
+    }
   } | null
   onVoted?: () => void
 }
-
-const VOTE_OPTIONS = [1, 5, 10, 20] as const
-const PRICE_PER_VOTE = 1.0
 
 export function QuickVoteDialog({
   open,
@@ -35,20 +38,24 @@ export function QuickVoteDialog({
   onVoted,
 }: QuickVoteDialogProps) {
   // No voter auth required — anyone can vote
-  const [voteCount, setVoteCount] = useState<number>(1)
+  const [amount, setAmount] = useState<string>('')
   const [method, setMethod] = useState<PaymentMethod | null>(null)
+  const [phone, setPhone] = useState('')
   const [processing, setProcessing] = useState(false)
-  const [success, setSuccess] = useState(false)
+  const [paymentInitiated, setPaymentInitiated] = useState(false)
+  const [phoneError, setPhoneError] = useState<string | null>(null)
   // Idempotency key — generated once per dialog open and reused on retries
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
   // Reset internal state whenever the dialog is (re)opened.
   useEffect(() => {
     if (open) {
-      setVoteCount(1)
+      setAmount('')
       setMethod(null)
+      setPhone('')
       setProcessing(false)
-      setSuccess(false)
+      setPaymentInitiated(false)
+      setPhoneError(null)
       // Generate a new idempotency key for each new dialog session
       setIdempotencyKey(crypto.randomUUID())
     }
@@ -61,24 +68,61 @@ export function QuickVoteDialog({
     }
   }, [method])
 
-  const total = useMemo(
-    () => (voteCount * PRICE_PER_VOTE).toFixed(2),
-    [voteCount],
+  const effectiveAmount = parseFloat(amount) || 0
+
+  // Get payment configuration from participant
+  const paymentConfig = participant?.paymentConfiguration
+
+  // Calculate estimated votes for UX display only using backend configuration
+  const estimatedVotes = useMemo(
+    () => {
+      if (!paymentConfig || !paymentConfig.votePrice || effectiveAmount <= 0) return 0
+      return Math.floor(effectiveAmount / paymentConfig.votePrice)
+    },
+    [effectiveAmount, paymentConfig?.votePrice],
   )
+
+  const validatePhone = (phone: string) => {
+    if (!phone.trim()) {
+      setPhoneError('Phone number is required')
+      return false
+    }
+    const cleaned = phone.replace(/[\s+]/g, '')
+    if (!/^\d{8,15}$/.test(cleaned)) {
+      setPhoneError('Invalid phone number format')
+      return false
+    }
+    setPhoneError(null)
+    return true
+  }
 
   const handleConfirm = async () => {
     if (!participant || !method) return
+    if (!validatePhone(phone)) return
+    if (!paymentConfig) {
+      toast.error('Payment configuration not available', {
+        description: 'Please try again later',
+      })
+      return
+    }
+    if (effectiveAmount < paymentConfig.minimumPayment) {
+      toast.error('Invalid amount', {
+        description: `Please enter an amount of at least ${paymentConfig.currency}${paymentConfig.minimumPayment.toFixed(2)}`,
+      })
+      return
+    }
     setProcessing(true)
     try {
       const result = await initiatePayment({
-        amount: Number(total),
+        amount: effectiveAmount,
         paymentMethod: method.method,
         contestantId: participant.id,
+        voterPhone: phone,
         idempotencyKey: idempotencyKey,
       })
-      setSuccess(true)
-      toast.success(`Cast ${voteCount} vote${voteCount > 1 ? 's' : ''} for ${participant.name}!`, {
-        description: `Reference: ${result.payment.reference}`,
+      setPaymentInitiated(true)
+      toast.success(`Payment initiated for ${participant.name}!`, {
+        description: `Complete payment in the Paynow window. Reference: ${result.payment.reference}`,
       })
       setTimeout(() => {
         onOpenChange(false)
@@ -111,74 +155,81 @@ export function QuickVoteDialog({
               className="flex items-center gap-2 text-xl"
               style={{ color: 'var(--text-primary)' }}
             >
-              <Zap className="size-5 text-amber-500" />
+              <DollarSign className="size-5 text-amber-500" />
               Quick Vote
             </DialogTitle>
             <DialogDescription style={{ color: 'var(--text-muted)' }}>
               {participant
-                ? `Cast your vote for ${participant.name} — ${participant.category}.`
-                : 'Cast your vote instantly.'}
+                ? `Support ${participant.name} — ${participant.category}.`
+                : 'Support your favorite contestant.'}
             </DialogDescription>
           </DialogHeader>
 
-          {success ? (
+          {paymentInitiated ? (
             <motion.div
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               className="py-8 flex flex-col items-center text-center"
             >
-              <CheckCircle2 className="size-12 text-green-500 mb-3" />
+              <Loader2 className="size-12 text-amber-500 animate-spin mb-3" />
               <div
                 className="text-lg font-semibold"
                 style={{ color: 'var(--text-primary)' }}
               >
-                {voteCount} vote{voteCount > 1 ? 's' : ''} cast!
+                Payment Initiated
               </div>
               <p
                 className="text-sm mt-1"
                 style={{ color: 'var(--text-muted)' }}
               >
-                Thanks for supporting {participant?.name}.
+                Complete payment in the Paynow window.
+              </p>
+              <p
+                className="text-xs mt-2"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                Votes will be credited after successful payment.
               </p>
             </motion.div>
           ) : (
             <div className="space-y-5 mt-2">
-              {/* Vote count selector — 4-button grid */}
+              {/* Amount input */}
               <div>
                 <div
                   className="text-xs uppercase tracking-wider font-semibold mb-2"
                   style={{ color: 'var(--text-muted)' }}
                 >
-                  Number of votes
+                  Amount to contribute
                 </div>
-                <div className="grid grid-cols-4 gap-2">
-                  {VOTE_OPTIONS.map((n) => {
-                    const selected = voteCount === n
-                    return (
-                      <button
-                        key={n}
-                        type="button"
-                        onClick={() => setVoteCount(n)}
-                        className={`relative rounded-xl py-3 text-sm font-bold transition-all duration-200 hover-lift ${
-                          selected
-                            ? 'text-[#0B0F17]'
-                            : 'bg-surface border border-border'
-                        }`}
-                        style={
-                          selected
-                            ? {
-                                background:
-                                  'linear-gradient(135deg, #F59E0B, #D97706)',
-                                color: '#0B0F17',
-                              }
-                            : { color: 'var(--text-primary)' }
-                        }
-                      >
-                        {n}
-                      </button>
-                    )
-                  })}
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-lg font-bold" style={{ color: '#F59E0B' }}>
+                    {paymentConfig?.currency || '$'}
+                  </span>
+                  <input
+                    type="number"
+                    min={paymentConfig?.minimumPayment || 0}
+                    step="0.01"
+                    placeholder="0.00"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    className="w-full pl-8 pr-4 py-3 rounded-xl text-lg font-bold"
+                    style={{
+                      background: 'var(--surface-1)',
+                      border: '1px solid var(--border-subtle)',
+                      color: 'var(--text-primary)',
+                    }}
+                  />
                 </div>
+                {effectiveAmount > 0 && (
+                  <div className="mt-2 text-sm" style={{ color: 'var(--text-muted)' }}>
+                    Estimated votes: <span className="font-bold" style={{ color: '#F59E0B' }}>{estimatedVotes}</span>
+                  </div>
+                )}
+                {paymentConfig && (
+                  <div className="text-xs text-muted-foreground mt-1">
+                    Minimum payment: {paymentConfig.currency}{paymentConfig.minimumPayment.toFixed(2)}
+                  </div>
+                )}
               </div>
 
               {/* Payment method selector */}
@@ -214,6 +265,37 @@ export function QuickVoteDialog({
                 </div>
               </div>
 
+              {/* Phone number input */}
+              <div>
+                <div
+                  className="text-xs uppercase tracking-wider font-semibold mb-2"
+                  style={{ color: 'var(--text-muted)' }}
+                >
+                  Phone number
+                </div>
+                <input
+                  type="tel"
+                  placeholder="+263 7XX XXX XXX"
+                  value={phone}
+                  onChange={(e) => {
+                    setPhone(e.target.value)
+                    if (phoneError) validatePhone(e.target.value)
+                  }}
+                  onBlur={() => {
+                    if (phone) validatePhone(phone)
+                  }}
+                  className="w-full px-4 py-3 rounded-xl"
+                  style={{
+                    background: 'var(--surface-1)',
+                    border: phoneError ? '1px solid #EF4444' : '1px solid var(--border-subtle)',
+                    color: 'var(--text-primary)',
+                  }}
+                />
+                {phoneError && (
+                  <p className="text-xs text-red-400 mt-1">{phoneError}</p>
+                )}
+              </div>
+
               {/* Total + CTA */}
               <div
                 className="rounded-xl p-3 flex items-center justify-between"
@@ -223,20 +305,20 @@ export function QuickVoteDialog({
                   className="text-sm"
                   style={{ color: 'var(--text-muted)' }}
                 >
-                  Total ({voteCount} × ${PRICE_PER_VOTE.toFixed(2)})
+                  Total
                 </span>
                 <span
                   className="text-2xl font-bold text-gold-400"
                   style={{ color: '#F59E0B' }}
                 >
-                  ${total}
+                  ${effectiveAmount.toFixed(2)}
                 </span>
               </div>
 
               <Button
                 type="button"
                 onClick={handleConfirm}
-                disabled={!method || processing || !participant}
+                disabled={!method || processing || !participant || !paymentConfig || effectiveAmount < paymentConfig.minimumPayment || !phone.trim()}
                 className="w-full h-12 px-8 text-base font-semibold rounded-full text-white bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 hover-lift disabled:opacity-50 disabled:cursor-not-allowed disabled:hover-lift-none"
               >
                 {processing ? (
@@ -247,7 +329,7 @@ export function QuickVoteDialog({
                 ) : (
                   <>
                     <Sparkles className="size-4 mr-2" />
-                    Pay ${total} · Cast {voteCount} Vote{voteCount > 1 ? 's' : ''}
+                    Pay {paymentConfig?.currency || '$'}{effectiveAmount.toFixed(2)}
                   </>
                 )}
               </Button>

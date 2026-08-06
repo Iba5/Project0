@@ -5,9 +5,11 @@ Payment validation utilities for event-aware payment processing.
 from datetime import datetime, timezone
 from typing import Optional
 from fastapi import HTTPException
+from decimal import Decimal
 
 from app.enums.enums import EventStatus, ContestantStatus
 from app.utils.event_utils import get_computed_event_status
+from app.core.config import settings
 
 
 def validate_payment_eligibility(
@@ -149,3 +151,59 @@ def get_payment_method_availability(
         "methods": [],
         "reason": f"Payment period not open. Current status: {computed_status}"
     }
+
+
+def resolve_vote_price(event_vote_price: Optional[Decimal]) -> Decimal:
+    """
+    Resolve the effective vote price for an event.
+    
+    Priority:
+    1. Event vote_price if set
+    2. Global MIN_PAYMENT_AMOUNT as fallback
+    
+    Args:
+        event_vote_price: The vote price configured on the event
+    
+    Returns:
+        Decimal: The effective vote price
+    """
+    if event_vote_price:
+        return event_vote_price
+    return Decimal(str(settings.MIN_PAYMENT_AMOUNT))
+
+
+def resolve_minimum_payment(event_minimum_payment: Optional[Decimal]) -> Decimal:
+    """
+    Resolve the effective minimum payment for an event.
+    
+    Priority:
+    1. Event minimum_payment if set
+    2. Global MIN_PAYMENT_AMOUNT as fallback
+    
+    Args:
+        event_minimum_payment: The minimum payment configured on the event
+    
+    Returns:
+        Decimal: The effective minimum payment
+    """
+    if event_minimum_payment:
+        return event_minimum_payment
+    return Decimal(str(settings.MIN_PAYMENT_AMOUNT))
+
+
+def calculate_votes_from_amount(amount: Decimal, vote_price: Decimal) -> int:
+    """
+    Calculate the number of votes from a payment amount.
+    
+    Formula: floor(amount / vote_price)
+    
+    Args:
+        amount: The payment amount
+        vote_price: The cost per vote
+    
+    Returns:
+        int: The number of votes (minimum 0)
+    """
+    if vote_price <= 0:
+        return 0
+    return int(amount // vote_price)
