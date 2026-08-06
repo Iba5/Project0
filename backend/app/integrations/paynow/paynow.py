@@ -17,16 +17,25 @@ class PaynowClient:
     Falls back to manual signature verification for webhook validation.
     
     Supports both sandbox (for testing) and production modes based on TEST_PAYMENT_MODE.
+    
+    Email Handling:
+    - The Paynow SDK requires auth_email for ALL payments (web and mobile)
+    - In sandbox mode: Uses the registered sandbox merchant email
+    - In production mode: Uses the actual customer/voter email
     """
     def __init__(self) -> None:
         # Select sandbox or production credentials based on TEST_PAYMENT_MODE
         if settings.TEST_PAYMENT_MODE:
             self.integration_id = settings.PAYNOW_SANDBOX_INTEGRATION_ID or settings.PAYNOW_INTEGRATION_ID
             self.integration_key = settings.PAYNOW_SANDBOX_INTEGRATION_KEY or settings.PAYNOW_INTEGRATION_KEY
-            logger.info("PaynowClient initialized in SANDBOX mode")
+            # In sandbox, use the registered merchant email
+            self.merchant_email = settings.PAYNOW_SANDBOX_MERCHANT_EMAIL or settings.SMTP_FROM_EMAIL
+            logger.info(f"PaynowClient initialized in SANDBOX mode with merchant email: {self.merchant_email}")
         else:
             self.integration_id = settings.PAYNOW_INTEGRATION_ID
             self.integration_key = settings.PAYNOW_INTEGRATION_KEY
+            # In production, will use customer email from request
+            self.merchant_email = None
             logger.info("PaynowClient initialized in PRODUCTION mode")
         
         self.result_url = settings.PAYNOW_RESULT_URL
@@ -72,17 +81,33 @@ class PaynowClient:
         """
         Creates a web payment via Paynow and sends it.
         Returns normalized dict with: success, redirect_url, poll_url, error
+        
+        Email Handling:
+        - Sandbox mode: Uses registered merchant email (ignores customer email)
+        - Production mode: Uses customer email from request
         """
         sdk = self._get_sdk()
 
-        payment = sdk.create_payment(reference, email)
+        # Use merchant email in sandbox, customer email in production
+        auth_email = self.merchant_email if settings.TEST_PAYMENT_MODE else email
+        
+        # In sandbox, fallback to merchant email if provided customer email is invalid
+        if settings.TEST_PAYMENT_MODE and not auth_email:
+            auth_email = settings.SMTP_FROM_EMAIL
+            logger.warning(f"Sandbox mode: Using fallback merchant email: {auth_email}")
+        
+        if not auth_email:
+            logger.error("Email is required for Paynow payments but not provided")
+            return {
+                "success": False,
+                "redirect_url": None,
+                "poll_url": None,
+                "error": "Email is required"
+            }
+
+        payment = sdk.create_payment(reference, auth_email)
         payment.add(item_name, amount)
         response = sdk.send(payment)
-
-        # Inspect response object to understand actual SDK structure
-        logger.info(f"Paynow web payment response type: {type(response)}")
-        logger.info(f"Paynow web payment response vars: {vars(response)}")
-        logger.info(f"Paynow web payment response dir: {dir(response)}")
 
         if response.success:
             logger.info(f"Paynow web payment initiated: ref={reference}, poll_url={response.poll_url}")
@@ -118,6 +143,10 @@ class PaynowClient:
         Creates a mobile (express) checkout payment via Paynow.
         Supports ecocash and onemoney methods.
         Returns normalized dict with: success, redirect_url, poll_url, instructions, error
+        
+        Email Handling:
+        - Sandbox mode: Uses registered merchant email (ignores customer email)
+        - Production mode: Uses customer email from request
         """
         sdk = self._get_sdk()
 
@@ -126,14 +155,27 @@ class PaynowClient:
             logger.warning(f"Invalid mobile method '{method}', defaulting to ecocash")
             method = "ecocash"
 
-        payment = sdk.create_payment(reference, email)
+        # Use merchant email in sandbox, customer email in production
+        auth_email = self.merchant_email if settings.TEST_PAYMENT_MODE else email
+        
+        # In sandbox, fallback to merchant email if provided customer email is invalid
+        if settings.TEST_PAYMENT_MODE and not auth_email:
+            auth_email = settings.SMTP_FROM_EMAIL
+            logger.warning(f"Sandbox mode: Using fallback merchant email: {auth_email}")
+        
+        if not auth_email:
+            logger.error("Email is required for Paynow payments but not provided")
+            return {
+                "success": False,
+                "redirect_url": None,
+                "poll_url": None,
+                "instructions": None,
+                "error": "Email is required"
+            }
+
+        payment = sdk.create_payment(reference, auth_email)
         payment.add(item_name, amount)
         response = sdk.send_mobile(payment, phone, method)
-
-        # Inspect response object to understand actual SDK structure
-        logger.info(f"Paynow mobile payment response type: {type(response)}")
-        logger.info(f"Paynow mobile payment response vars: {vars(response)}")
-        logger.info(f"Paynow mobile payment response dir: {dir(response)}")
 
         if response.success:
             logger.info(f"Paynow mobile payment initiated: ref={reference}, phone={phone[:4]}***, method={method}")

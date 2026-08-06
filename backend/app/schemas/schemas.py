@@ -252,9 +252,20 @@ class PaymentCreate(CamelModel):
     def validate_phone(cls, v: str) -> str:
         """Strip spaces and ensure it looks like a phone number."""
         cleaned = v.strip().replace(" ", "").replace("+", "")
+        if not cleaned:
+            raise ValueError("Phone number cannot be empty")
         if not cleaned.isdigit() or len(cleaned) < 8:
             raise ValueError("Invalid phone number format")
         return cleaned
+    
+    @field_validator('voter_email')
+    @classmethod
+    def validate_email(cls, v: Optional[str], info) -> Optional[str]:
+        """Validate email is provided in production mode."""
+        from app.core.config import settings
+        if not settings.TEST_PAYMENT_MODE and not v:
+            raise ValueError("Email is required for payment initiation in production mode")
+        return v
 
 class PaymentResponse(CamelModel):
     id: str

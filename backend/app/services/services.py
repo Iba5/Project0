@@ -1292,7 +1292,13 @@ class PaymentService:
 
         # 13. Call Paynow SDK with the actual payment amount
         item_name = f"Vote for {part.name}"
-        voter_email = payment_in.voter_email or "voter@example.com"
+        
+        # Email handling:
+        # - Sandbox mode: PaynowClient will use merchant email internally (pass None)
+        # - Production mode: Use customer email (required)
+        voter_email = payment_in.voter_email if not settings.TEST_PAYMENT_MODE else None
+        if not voter_email and not settings.TEST_PAYMENT_MODE:
+            raise PaymentException("Email is required for payment initiation in production mode")
 
         try:
             if is_mobile:
