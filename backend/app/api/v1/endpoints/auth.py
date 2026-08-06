@@ -160,8 +160,9 @@ def login(
     login_in: UserLogin,
     db: Session = Depends(get_db),
 ) -> AuthResult:
+    from app.utils.ip_utils import get_client_ip
     auth_service = AuthService(db)
-    client_ip = request.client.host if request.client else None
+    client_ip = get_client_ip(request)
     auth_result = auth_service.login_admin(login_in, ip_address=client_ip)
     
     # Set refresh token in httpOnly cookie
@@ -191,8 +192,9 @@ def logout(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
+    from app.utils.ip_utils import get_client_ip
     auth_service = AuthService(db)
-    client_ip = request.client.host if request.client else None
+    client_ip = get_client_ip(request)
     auth_service.logout_admin(current_user.id, ip_address=client_ip)
     
     # Clear refresh token cookie

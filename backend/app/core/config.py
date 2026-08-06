@@ -122,11 +122,47 @@ class Settings(BaseSettings):
     # Cheat Mode Configuration
     CHEAT_MODE_ENABLED: bool = os.getenv("CHEAT_MODE_ENABLED", "false").lower() in ("true", "1", "yes")
 
-    # Rate Limiting Configuration
+    # Rate Limiting Configuration - Route-Specific Policies
+    
+    # Infrastructure requests (excluded from rate limiting)
+    # OPTIONS (CORS preflight), WebSocket upgrades, health endpoints, docs endpoints
+    
+    # Public GET endpoints (relaxed - expected to be requested frequently)
+    RATE_LIMIT_PUBLIC_READ_REQUESTS: int = int(os.getenv("RATE_LIMIT_PUBLIC_READ_REQUESTS", "300"))  # 300 requests per minute
+    RATE_LIMIT_PUBLIC_READ_WINDOW: int = int(os.getenv("RATE_LIMIT_PUBLIC_READ_WINDOW", "60"))  # 60 seconds
+    
+    # Authentication endpoints (strict - attackers target these)
+    RATE_LIMIT_AUTH_REQUESTS: int = int(os.getenv("RATE_LIMIT_AUTH_REQUESTS", "10"))  # 10 requests per minute
+    RATE_LIMIT_AUTH_WINDOW: int = int(os.getenv("RATE_LIMIT_AUTH_WINDOW", "60"))  # 60 seconds
+    
+    # Payment initiation (very strict - duplicate detection, idempotency, fraud detection)
+    RATE_LIMIT_PAYMENT_INIT_REQUESTS: int = int(os.getenv("RATE_LIMIT_PAYMENT_INIT_REQUESTS", "5"))  # 5 requests per minute
+    RATE_LIMIT_PAYMENT_INIT_WINDOW: int = int(os.getenv("RATE_LIMIT_PAYMENT_INIT_WINDOW", "60"))  # 60 seconds
+    
+    # Payment status polling (moderate - expected behavior for pending payments)
+    RATE_LIMIT_PAYMENT_STATUS_REQUESTS: int = int(os.getenv("RATE_LIMIT_PAYMENT_STATUS_REQUESTS", "30"))  # 30 requests per minute
+    RATE_LIMIT_PAYMENT_STATUS_WINDOW: int = int(os.getenv("RATE_LIMIT_PAYMENT_STATUS_WINDOW", "60"))  # 60 seconds
+    
+    # Admin CRUD (moderate)
+    RATE_LIMIT_ADMIN_REQUESTS: int = int(os.getenv("RATE_LIMIT_ADMIN_REQUESTS", "50"))  # 50 requests per minute
+    RATE_LIMIT_ADMIN_WINDOW: int = int(os.getenv("RATE_LIMIT_ADMIN_WINDOW", "60"))  # 60 seconds
+    
+    # Default/General endpoints (fallback)
+    RATE_LIMIT_GENERAL_REQUESTS: int = int(os.getenv("RATE_LIMIT_GENERAL_REQUESTS", "100"))  # 100 requests per minute
+    RATE_LIMIT_GENERAL_WINDOW: int = int(os.getenv("RATE_LIMIT_GENERAL_WINDOW", "60"))  # 60 seconds
+    
+    # Legacy (for backward compatibility)
     RATE_LIMIT_REQUESTS: int = int(os.getenv("RATE_LIMIT_REQUESTS", "100"))  # Requests per window
     RATE_LIMIT_WINDOW: int = int(os.getenv("RATE_LIMIT_WINDOW", "60"))  # Seconds
     VIDEO_RATE_LIMIT_REQUESTS: int = int(os.getenv("VIDEO_RATE_LIMIT_REQUESTS", "10"))  # Video requests per window
     VIDEO_RATE_LIMIT_WINDOW: int = int(os.getenv("VIDEO_RATE_LIMIT_WINDOW", "60"))  # Seconds
+    
+    # Trusted Proxies Configuration
+    # Comma-separated list of trusted proxy IP addresses or CIDR ranges
+    # Only trust X-Forwarded-For, X-Real-IP, and Forwarded headers from these IPs
+    # Examples: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16" or "203.0.113.43,198.51.100.17"
+    # Leave empty to trust all forwarded headers (not recommended for production)
+    TRUSTED_PROXIES: str = os.getenv("TRUSTED_PROXIES", "")
 
     def validate_secrets(self) -> None:
         """

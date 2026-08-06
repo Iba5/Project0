@@ -3,7 +3,7 @@ import uuid
 import logging
 import threading
 import os
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, Literal
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import (
@@ -13,21 +13,102 @@ from starlette.middleware.base import (
 from redis.asyncio import Redis
 from starlette.responses import Response
 from app.core.config import settings
+from app.utils.ip_utils import get_client_ip
 
 logger = logging.getLogger(__name__)
 
-# --- Rate Limit Configuration ---
-# More restrictive limits for production security
-# These can be overridden via environment variables
-LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
-MAX_REQUESTS_PER_WINDOW = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "60"))  # 60 requests per minute
+# --- Rate Limit Categories ---
+RateLimitCategory = Literal[
+    "infrastructure",  # Excluded from rate limiting
+    "public_read",     # Relaxed limits for public GET endpoints
+    "auth",            # Strict limits for authentication endpoints
+    "payment_init",    # Very strict for payment initiation
+    "payment_status",  # Moderate for payment status polling
+    "admin",           # Moderate for admin CRUD
+    "general",         # Default fallback
+]
 
-PAYMENT_LIMIT_WINDOW_SECONDS = int(os.getenv("PAYMENT_RATE_LIMIT_WINDOW_SECONDS", "60"))
-MAX_PAYMENT_REQUESTS_PER_WINDOW = int(os.getenv("PAYMENT_RATE_LIMIT_MAX_REQUESTS", "5"))  # 5 payment attempts per minute (strict)
+# --- Route Classification ---
+def classify_route(method: str, path: str) -> RateLimitCategory:
+    """
+    Classify a request into a rate limit category based on method and path.
+    """
+    path_lower = path.lower()
+    method_upper = method.upper()
+    
+    # Infrastructure requests - exclude from rate limiting (bypass before any Redis/IP work)
+    if method_upper == "OPTIONS":
+        return "infrastructure"
+    if path_lower.startswith("/socket.io"):
+        return "infrastructure"
+    if path_lower in ("/health", "/healthz", "/readiness", "/liveness"):
+        return "infrastructure"
+    if path_lower.startswith("/docs") or path_lower.startswith("/redoc") or path_lower.startswith("/openapi"):
+        return "infrastructure"
+    
+    # Webhooks - exclude from rate limiting (protected by signature verification)
+    if path_lower.startswith("/api/v1/payments/paynow/callback"):
+        return "infrastructure"
+    
+    # Public GET endpoints - relaxed limits
+    if method_upper == "GET":
+        if path_lower.startswith("/api/v1/public/events"):
+            return "public_read"
+        if path_lower.startswith("/api/v1/public/participants"):
+            return "public_read"
+        if path_lower.startswith("/api/v1/participants/public"):
+            return "public_read"
+        if path_lower.startswith("/api/v1/participants/leaderboard"):
+            return "public_read"
+        if path_lower.startswith("/api/v1/stats"):
+            return "public_read"
+    
+    # Authentication endpoints - strict limits
+    if path_lower.startswith("/api/v1/auth/login"):
+        return "auth"
+    if path_lower.startswith("/api/v1/auth/refresh"):
+        return "auth"
+    if path_lower.startswith("/api/v1/auth/forgot-password"):
+        return "auth"
+    if path_lower.startswith("/api/v1/auth/reset-password"):
+        return "auth"
+    if path_lower.startswith("/api/v1/auth/otp"):
+        return "auth"
+    if path_lower.startswith("/api/v1/accept-invitation"):
+        return "auth"
+    
+    # Payment initiation - very strict (POST /payments, POST /payments/, POST /payments/initiate)
+    if method_upper == "POST" and (
+        path_lower == "/api/v1/payments" or 
+        path_lower == "/api/v1/payments/" or 
+        path_lower.startswith("/api/v1/payments/initiate")
+    ):
+        return "payment_init"
+    
+    # Payment status polling - moderate
+    if method_upper == "GET" and path_lower.startswith("/api/v1/payments/check-status"):
+        return "payment_status"
+    
+    # Admin CRUD - moderate
+    if path_lower.startswith("/api/v1/admin"):
+        return "admin"
+    
+    # Default to general
+    return "general"
+
+# --- Rate Limit Configuration by Category ---
+RATE_LIMIT_CONFIG: Dict[RateLimitCategory, Tuple[int, int]] = {
+    "infrastructure": (0, 0),  # No rate limiting
+    "public_read": (settings.RATE_LIMIT_PUBLIC_READ_REQUESTS, settings.RATE_LIMIT_PUBLIC_READ_WINDOW),
+    "auth": (settings.RATE_LIMIT_AUTH_REQUESTS, settings.RATE_LIMIT_AUTH_WINDOW),
+    "payment_init": (settings.RATE_LIMIT_PAYMENT_INIT_REQUESTS, settings.RATE_LIMIT_PAYMENT_INIT_WINDOW),
+    "payment_status": (settings.RATE_LIMIT_PAYMENT_STATUS_REQUESTS, settings.RATE_LIMIT_PAYMENT_STATUS_WINDOW),
+    "admin": (settings.RATE_LIMIT_ADMIN_REQUESTS, settings.RATE_LIMIT_ADMIN_WINDOW),
+    "general": (settings.RATE_LIMIT_GENERAL_REQUESTS, settings.RATE_LIMIT_GENERAL_WINDOW),
+}
 
 # --- In-Memory Fallback (used when Redis is unavailable) ---
 _in_memory_limits: Dict[str, Tuple[int, float]] = {}
-_in_memory_payment_limits: Dict[str, Tuple[int, float]] = {}
 _fallback_lock = threading.Lock()
 _fallback_cleanup_interval = 300
 _last_fallback_cleanup = 0.0
@@ -41,18 +122,14 @@ def _cleanup_in_memory() -> None:
         return
     _last_fallback_cleanup = now
     with _fallback_lock:
-        expired = [k for k, (_, ws) in _in_memory_limits.items() if now - ws > LIMIT_WINDOW_SECONDS]
+        expired = [k for k, (_, ws) in _in_memory_limits.items() if now - ws > 300]  # 5 minute max window
         for k in expired:
             del _in_memory_limits[k]
-        expired_p = [k for k, (_, ws) in _in_memory_payment_limits.items() if now - ws > PAYMENT_LIMIT_WINDOW_SECONDS]
-        for k in expired_p:
-            del _in_memory_payment_limits[k]
 
 
 def _check_in_memory(
-    store: Dict[str, Tuple[int, float]], 
-    key: str, 
-    max_requests: int, 
+    key: str,
+    max_requests: int,
     window_seconds: float
 ) -> bool:
     """
@@ -60,16 +137,16 @@ def _check_in_memory(
     Uses a sliding window approach.
     """
     now = time.time()
-    if key not in store:
-        store[key] = (1, now)
+    if key not in _in_memory_limits:
+        _in_memory_limits[key] = (1, now)
         return True
-    count, window_start = store[key]
+    count, window_start = _in_memory_limits[key]
     if now - window_start > window_seconds:
-        store[key] = (1, now)
+        _in_memory_limits[key] = (1, now)
         return True
     if count >= max_requests:
         return False
-    store[key] = (count + 1, window_start)
+    _in_memory_limits[key] = (count + 1, window_start)
     return True
 
 
@@ -77,17 +154,17 @@ async def _check_redis_rate_limit(
     redis_client: Redis,
     key: str,
     max_requests: int,
-    window_seconds: int,) -> bool | None:    
+    window_seconds: int,
+) -> bool | None:
     """
     Redis-based sliding window rate limit using INCR + EXPIRE.
-    Returns True if ALLOWED, False if blocked.
+    Returns True if ALLOWED, False if blocked, None if error.
     """
     try:
         current: int = await redis_client.incr(key)
         if current == 1:
             await redis_client.expire(key, window_seconds)
         return current <= max_requests
-
     except Exception as e:
         logger.warning(
             f"Redis rate limit check failed for {key}: {e}. Falling back to in-memory."
@@ -97,25 +174,45 @@ async def _check_redis_rate_limit(
 
 class RateLimitingMiddleware(BaseHTTPMiddleware):
     """
-    Redis-backed distributed rate limiting middleware.
+    Route-specific rate limiting middleware with category-based policies.
+    
+    Categories:
+    - infrastructure: Excluded (OPTIONS, WebSocket, health, docs, webhooks)
+    - public_read: Relaxed (300 req/min) for public GET endpoints
+    - auth: Strict (10 req/min) for authentication endpoints
+    - payment_init: Very strict (5 req/min) for payment initiation
+    - payment_status: Moderate (30 req/min) for payment status polling
+    - admin: Moderate (50 req/min) for admin CRUD
+    - general: Default (100 req/min) for other endpoints
     
     Primary: Redis INCR/EXPIRE for atomic, multi-worker-safe counting.
     Fallback: In-memory dict if Redis is unavailable (single-worker only).
+    
+    Security: Uses composite keys (IP + identifier) for sensitive endpoints.
     """
     async def dispatch(
         self,
         request: Request,
         call_next: RequestResponseEndpoint,
     ) -> Response:
-        # Bypass Socket.IO long-polling and websocket upgrades entirely
-        if request.url.path.startswith("/socket.io"):
+        # Extract real client IP (handles reverse proxies)
+        client_ip = get_client_ip(request)
+        path = request.url.path
+        method = request.method
+        
+        # Classify the route
+        category = classify_route(method, path)
+        
+        # Infrastructure requests bypass rate limiting entirely
+        if category == "infrastructure":
             return await call_next(request)
-
-        client_ip = request.client.host if request.client else "127.0.0.1"
-        path = request.url.path.lower()
-
-        is_payment_init = "/payments/initiate" in path
-
+        
+        # Get rate limit configuration for this category
+        max_requests, window_seconds = RATE_LIMIT_CONFIG[category]
+        
+        # Build composite rate limit key based on category
+        rate_limit_key = await self._build_rate_limit_key(request, category, client_ip, path)
+        
         # Try Redis first
         redis_ok = False
         redis_client = None
@@ -125,71 +222,145 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
                 redis_client = rc
         except Exception:
             pass
-
+        
         if redis_client is not None:
-            redis_ok = await self._check_redis(client_ip, is_payment_init, redis_client)
+            redis_ok = await self._check_redis(rate_limit_key, max_requests, window_seconds, redis_client)
             if redis_ok is False:
                 # Blocked by Redis
-                return self._rate_limit_response(client_ip, is_payment_init)
-
+                return self._rate_limit_response(client_ip, category, max_requests, window_seconds)
+        
         # In-memory fallback
         if redis_ok is not True:
             _cleanup_in_memory()
             with _fallback_lock:
-                if is_payment_init:
-                    allowed = _check_in_memory(
-                        _in_memory_payment_limits, client_ip,
-                        MAX_PAYMENT_REQUESTS_PER_WINDOW, PAYMENT_LIMIT_WINDOW_SECONDS
-                    )
-                else:
-                    allowed = _check_in_memory(
-                        _in_memory_limits, client_ip,
-                        MAX_REQUESTS_PER_WINDOW, LIMIT_WINDOW_SECONDS
-                    )
+                allowed = _check_in_memory(
+                    rate_limit_key,
+                    max_requests,
+                    window_seconds
+                )
                 if not allowed:
-                    return self._rate_limit_response(client_ip, is_payment_init)
-
+                    return self._rate_limit_response(client_ip, category, max_requests, window_seconds)
+        
         return await call_next(request)
-
+    
+    async def _build_rate_limit_key(
+        self,
+        request: Request,
+        category: RateLimitCategory,
+        client_ip: str,
+        path: str
+    ) -> str:
+        """
+        Build a composite rate limit key based on the category.
+        
+        - auth: IP + email (from request body)
+        - payment_init: IP + phone (from request body)
+        - payment_status: IP + reference (from URL path)
+        - others: IP-only
+        """
+        # Auth: IP + email
+        if category == "auth":
+            try:
+                body = await request.json()
+                email = body.get("email", "unknown")
+                return f"rl:auth:{client_ip}:{email}"
+            except Exception:
+                # Fallback to IP-only if body parsing fails
+                return f"rl:auth:{client_ip}"
+        
+        # Payment initiation: IP + phone
+        if category == "payment_init":
+            try:
+                body = await request.json()
+                phone = body.get("voter_phone", "unknown")
+                return f"rl:payment_init:{client_ip}:{phone}"
+            except Exception:
+                # Fallback to IP-only if body parsing fails
+                return f"rl:payment_init:{client_ip}"
+        
+        # Payment status: IP + reference (from URL path)
+        if category == "payment_status":
+            # Extract reference from path: /api/v1/payments/check-status/{reference}
+            parts = path.split("/")
+            if len(parts) >= 6:
+                reference = parts[5]  # /api/v1/payments/check-status/{reference}
+                return f"rl:payment_status:{client_ip}:{reference}"
+            return f"rl:payment_status:{client_ip}"
+        
+        # Default: IP-only
+        return f"rl:{category}:{client_ip}"
+    
     async def _check_redis(
         self,
-        client_ip: str,
-        is_payment_init: bool,
+        rate_limit_key: str,
+        max_requests: int,
+        window_seconds: int,
         redis_client: Redis,
     ) -> Optional[bool]:
         """Check rate limit via Redis. Returns True/False/None (error)."""
         try:
-            if is_payment_init:
-                key = f"rl:payment:{client_ip}"
-                return await _check_redis_rate_limit(redis_client, key, MAX_PAYMENT_REQUESTS_PER_WINDOW, PAYMENT_LIMIT_WINDOW_SECONDS)
-            else:
-                key = f"rl:global:{client_ip}"
-                return await _check_redis_rate_limit(redis_client, key, MAX_REQUESTS_PER_WINDOW, LIMIT_WINDOW_SECONDS)
+            return await _check_redis_rate_limit(redis_client, rate_limit_key, max_requests, window_seconds)
         except Exception as e:
             logger.warning(f"Redis rate limit error: {e}")
             return None
-
+    
     @staticmethod
-    def _rate_limit_response(client_ip: str, is_payment: bool) -> JSONResponse:
-        if is_payment:
-            logger.warning(f"Payment rate limit exceeded for IP: {client_ip}")
-            return JSONResponse(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                content={
-                    "success": False,
-                    "message": "Too many payment attempts. Please wait before trying again.",
-                    "errors": []
-                }
-            )
-        logger.warning(f"Rate limit exceeded for IP: {client_ip}")
-        return JSONResponse(
+    def _rate_limit_response(
+        client_ip: str,
+        category: RateLimitCategory,
+        max_requests: int,
+        window_seconds: int,
+    ) -> JSONResponse:
+        """Return user-friendly rate limit response with Retry-After header."""
+        retry_after = window_seconds
+        
+        # User-friendly messages by category
+        user_messages = {
+            "public_read": {
+                "title": "Please wait a moment",
+                "message": "We're processing your recent requests. Please try again shortly.",
+            },
+            "auth": {
+                "title": "Too many authentication attempts",
+                "message": "For your security, please wait before trying again.",
+            },
+            "payment_init": {
+                "title": "Too many payment attempts",
+                "message": "For your security, please wait before trying another payment.",
+            },
+            "payment_status": {
+                "title": "Please wait a moment",
+                "message": "We're checking your payment status. Please try again shortly.",
+            },
+            "admin": {
+                "title": "Please wait a moment",
+                "message": "We're processing your recent requests. Please try again shortly.",
+            },
+            "general": {
+                "title": "Please wait a moment",
+                "message": "We're processing your recent requests. Please try again shortly.",
+            },
+        }
+        
+        msg = user_messages.get(category, user_messages["general"])
+        
+        # Log detailed information server-side
+        logger.warning(
+            f"Rate limit exceeded | Category: {category} | IP: {client_ip} | "
+            f"Limit: {max_requests}/{window_seconds}s"
+        )
+        
+        response = JSONResponse(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             content={
-                "success": False,
-                "message": "Too many requests. Please try again later.",
-                "errors": []
+                "code": "RATE_LIMITED",
+                "title": msg["title"],
+                "message": msg["message"],
+                "retryAfter": retry_after,
             }
         )
+        response.headers["Retry-After"] = str(retry_after)
+        return response
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
@@ -253,7 +424,8 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
         
-        client_ip = request.client.host if request.client else "unknown"
+        # Extract real client IP (handles reverse proxies)
+        client_ip = get_client_ip(request)
         user_id = getattr(request.state, "user_id", "anonymous")
         
         logger.info(
