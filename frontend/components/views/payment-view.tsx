@@ -31,6 +31,7 @@ import {
   getPublicParticipant,
   initiatePayment,
   getPaymentMethods,
+  getPaymentConfiguration,
   paymentMethods as fallbackPaymentMethods,
   type PaymentMethod,
 } from '@/lib/api'
@@ -45,8 +46,7 @@ const STEPS = [
   { id: 4, label: 'Confirm', icon: CheckCircle2 },
 ]
 
-// Quick amount presets
-const QUICK_AMOUNTS = [1, 5, 10, 25, 50]
+
 
 // Vote calculator: votes = amount / vote_price (rounded down)
 function calculateVotes(amount: number, votePrice: number): number {
@@ -257,7 +257,7 @@ function VoteCalculator({ amount, votePrice }: { amount: number; votePrice: numb
       <div className="flex items-center gap-2 mb-2">
         <Calculator className="size-4" style={{ color: '#F59E0B' }} />
         <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-          Vote Calculator
+          Estimated Votes
         </span>
       </div>
       <div className="flex items-center justify-between">
@@ -313,7 +313,14 @@ export default function PaymentView({ participantId }: { participantId: string }
 
   const [participantName, setParticipantName] = useState<string>('')
   const [participantCategory, setParticipantCategory] = useState<string>('')
-  const [votePrice, setVotePrice] = useState<number>(0.5) // Default minimum
+  const [paymentConfig, setPaymentConfig] = useState<{
+    minimumPayment: number
+    votePrice: number
+    currency: string
+    eventName: string | null
+    votingOpen: boolean
+    eventId: string | null
+  } | null>(null)
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>(fallbackPaymentMethods)
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod | null>(null)
   const [phone, setPhone] = useState('')
@@ -327,9 +334,7 @@ export default function PaymentView({ participantId }: { participantId: string }
   const [completedSteps, setCompletedSteps] = useState<number[]>([])
 
   // Amount selection
-  const [selectedAmount, setSelectedAmount] = useState<number>(1)
   const [customAmount, setCustomAmount] = useState<string>('')
-  const [isCustomAmount, setIsCustomAmount] = useState(false)
 
   // Input validation
   const [emailError, setEmailError] = useState<string | null>(null)
@@ -339,7 +344,7 @@ export default function PaymentView({ participantId }: { participantId: string }
 
   // No voter auth required — voter info fields are optional for receipt purposes
 
-  // Load participant data
+  // Load participant data and payment configuration
   useEffect(() => {
     async function loadParticipant() {
       if (!paymentParticipantId) return
@@ -348,16 +353,13 @@ export default function PaymentView({ participantId }: { participantId: string }
         setParticipantName(data.name)
         setParticipantCategory(data.category)
 
-        // Load vote price from participant's event
-        if (data.eventId) {
-          try {
-            const eventResponse = await apiFetch(`/events/${data.eventId}`) as { event?: { votePrice?: number } }
-            if (eventResponse.event?.votePrice) {
-              setVotePrice(eventResponse.event.votePrice)
-            }
-          } catch (error) {
-            console.error('Failed to fetch vote price, using default', error)
-          }
+        // Load payment configuration from backend
+        const config = await getPaymentConfiguration(paymentParticipantId)
+        setPaymentConfig(config)
+
+        // Check if voting is open
+        if (!config.votingOpen) {
+          toast.error('Voting is currently closed for this event')
         }
       } catch {
         setParticipantName('Contestant')
@@ -432,7 +434,7 @@ export default function PaymentView({ participantId }: { participantId: string }
   }, [])
 
   // Get the effective amount
-  const effectiveAmount = isCustomAmount ? parseFloat(customAmount) || 0 : selectedAmount
+  const effectiveAmount = parseFloat(customAmount) || 0
 
   // Step navigation
   const goToStep = (step: number) => {
@@ -443,7 +445,7 @@ export default function PaymentView({ participantId }: { participantId: string }
   }
 
   const canProceedToStep2 = paymentParticipantId !== null
-  const canProceedToStep3 = effectiveAmount >= votePrice
+  const canProceedToStep3 = paymentConfig !== null && effectiveAmount >= paymentConfig.minimumPayment
   const canProceedToStep4 = selectedMethod !== null
 
   const handleNextStep = () => {
@@ -558,7 +560,7 @@ export default function PaymentView({ participantId }: { participantId: string }
             transition={{ delay: 0.6 }}
             className="text-muted-foreground mb-1"
           >
-            Your {calculateVotes(effectiveAmount, votePrice)} vote{calculateVotes(effectiveAmount, votePrice) !== 1 ? 's' : ''} {calculateVotes(effectiveAmount, votePrice) !== 1 ? 'have' : 'has'} been unlocked.
+            Your {paymentConfig ? calculateVotes(effectiveAmount, paymentConfig.votePrice) : calculateVotes(effectiveAmount, 1)} vote{paymentConfig ? calculateVotes(effectiveAmount, paymentConfig.votePrice) !== 1 ? 's' : '' : calculateVotes(effectiveAmount, 1) !== 1 ? 's' : ''} {paymentConfig ? calculateVotes(effectiveAmount, paymentConfig.votePrice) !== 1 ? 'have' : 'has' : calculateVotes(effectiveAmount, 1) !== 1 ? 'have' : 'has'} been unlocked.
           </motion.p>
           {participantName && (
             <motion.p
@@ -720,144 +722,47 @@ export default function PaymentView({ participantId }: { participantId: string }
                 <div>
                   <h1 className="text-2xl font-bold mb-1">Choose Amount</h1>
                   <p className="text-sm text-muted-foreground">
-                    Select how much you want to contribute
+                    Enter how much you want to contribute
                   </p>
                 </div>
 
-                {/* Quick amounts row */}
-                <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-                  {QUICK_AMOUNTS.map((amount) => (
-                    <motion.button
-                      key={amount}
-                      onClick={() => {
-                        setSelectedAmount(amount)
-                        setIsCustomAmount(false)
-                        setCustomAmount('')
-                      }}
-                      whileHover={{ scale: 1.03 }}
-                      whileTap={{ scale: 0.97 }}
-                      className={`relative rounded-xl p-3 text-center transition-all duration-200 ${
-                        !isCustomAmount && selectedAmount === amount
-                          ? 'glass-premium'
-                          : 'glass'
-                      }`}
+                {/* Currency Input */}
+                <div className="glass rounded-xl p-4">
+                  <Label htmlFor="amount" className="text-sm font-medium mb-2 block">
+                    Amount to Contribute
+                  </Label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-lg font-bold" style={{ color: '#F59E0B' }}>
+                      {paymentConfig?.currency || '$'}
+                    </span>
+                    <Input
+                      id="amount"
+                      type="number"
+                      min={paymentConfig?.minimumPayment || 0}
+                      step="0.01"
+                      placeholder="0.00"
+                      value={customAmount}
+                      onChange={(e) => setCustomAmount(e.target.value)}
+                      className="pl-8 text-lg font-bold h-12 rounded-xl"
                       style={{
-                        border:
-                          !isCustomAmount && selectedAmount === amount
-                            ? '2px solid rgba(245,158,11,0.5)'
-                            : '1px solid var(--border-subtle)',
-                        boxShadow:
-                          !isCustomAmount && selectedAmount === amount
-                            ? '0 0 16px rgba(245,158,11,0.15)'
-                            : 'none',
+                        background: 'var(--surface-1)',
+                        borderColor: 'var(--border-subtle)',
+                        color: 'var(--text-primary)',
                       }}
-                    >
-                      {!isCustomAmount && selectedAmount === amount && (
-                        <motion.div
-                          initial={{ scale: 0 }}
-                          animate={{ scale: 1 }}
-                          className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center"
-                          style={{
-                            background: 'linear-gradient(135deg, #F59E0B, #D97706)',
-                          }}
-                        >
-                          <Check className="size-3 text-[#0B0F17]" />
-                        </motion.div>
-                      )}
-                      <div className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
-                        ${amount}
-                      </div>
-                      <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                        {calculateVotes(amount, votePrice)} vote{calculateVotes(amount, votePrice) !== 1 ? 's' : ''}
-                      </div>
-                    </motion.button>
-                  ))}
-                  {/* Custom amount button */}
-                  <motion.button
-                    onClick={() => {
-                      setIsCustomAmount(true)
-                      setSelectedAmount(0)
-                    }}
-                    whileHover={{ scale: 1.03 }}
-                    whileTap={{ scale: 0.97 }}
-                    className={`relative rounded-xl p-3 text-center transition-all duration-200 ${
-                      isCustomAmount ? 'glass-premium' : 'glass'
-                    }`}
-                    style={{
-                      border: isCustomAmount
-                        ? '2px solid rgba(245,158,11,0.5)'
-                        : '1px solid var(--border-subtle)',
-                      boxShadow: isCustomAmount
-                        ? '0 0 16px rgba(245,158,11,0.15)'
-                        : 'none',
-                    }}
-                  >
-                    {isCustomAmount && (
-                      <motion.div
-                        initial={{ scale: 0 }}
-                        animate={{ scale: 1 }}
-                        className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center"
-                        style={{
-                          background: 'linear-gradient(135deg, #F59E0B, #D97706)',
-                        }}
-                      >
-                        <Check className="size-3 text-[#0B0F17]" />
-                      </motion.div>
-                    )}
-                    <div className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
-                      Custom
-                    </div>
-                    <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                      Any amount
-                    </div>
-                  </motion.button>
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Minimum payment: {paymentConfig?.currency || '$'}{paymentConfig?.minimumPayment?.toFixed(2) || '0.00'}
+                  </p>
+                  {customAmount && parseFloat(customAmount) < (paymentConfig?.minimumPayment || 0) && (
+                    <p className="text-xs text-red-400 mt-1">Amount must be at least {paymentConfig?.currency || '$'}{paymentConfig?.minimumPayment?.toFixed(2) || '0.00'}</p>
+                  )}
                 </div>
 
-                {/* Custom amount input */}
-                <AnimatePresence>
-                  {isCustomAmount && (
-                    <motion.div
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                      className="overflow-hidden"
-                    >
-                      <div className="glass rounded-xl p-4">
-                        <Label className="text-sm font-medium mb-2 block">
-                          Enter custom amount
-                        </Label>
-                        <div className="relative">
-                          <span
-                            className="absolute left-3 top-1/2 -translate-y-1/2 text-lg font-bold"
-                            style={{ color: '#F59E0B' }}
-                          >
-                            $
-                          </span>
-                          <Input
-                            type="number"
-                            min="1"
-                            step="0.01"
-                            placeholder="0.00"
-                            value={customAmount}
-                            onChange={(e) => setCustomAmount(e.target.value)}
-                            className="pl-8 text-lg font-bold h-12 rounded-xl"
-                            style={{
-                              background: 'var(--surface-1)',
-                              borderColor: 'var(--border-subtle)',
-                              color: 'var(--text-primary)',
-                            }}
-                          />
-                        </div>
-                        {customAmount && parseFloat(customAmount) < votePrice && (
-                          <p className="text-xs text-red-400 mt-1">Minimum amount is ${votePrice.toFixed(2)}</p>
-                        )}
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
                 {/* Vote Calculator */}
-                {effectiveAmount >= votePrice && <VoteCalculator amount={effectiveAmount} votePrice={votePrice} />}
+                {paymentConfig && effectiveAmount >= paymentConfig.minimumPayment && (
+                  <VoteCalculator amount={effectiveAmount} votePrice={paymentConfig.votePrice} />
+                )}
 
                 {/* Continue button */}
                 <Button

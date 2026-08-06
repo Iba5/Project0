@@ -227,9 +227,7 @@ class PaymentEnvelopeResponse(CamelModel):
 
 class PaymentCreate(CamelModel):
     contestant_id: str
-    # BUG 5 FIX: `amount` removed. The server determines the payment
-    # amount from Event.vote_price. Client-supplied amounts are
-    # ignored to prevent price manipulation (e.g. amount=0.01).
+    amount: float = Field(..., gt=0, description="Payment amount in currency units")
     payment_method: str
     voter_phone: str = Field(..., min_length=8, max_length=15, description="Voter phone number (required)")
     voter_email: Optional[str] = None
@@ -244,6 +242,15 @@ class PaymentCreate(CamelModel):
         if not cleaned.isdigit() or len(cleaned) < 8:
             raise ValueError("Invalid phone number format")
         return cleaned
+
+class PaymentConfigurationResponse(CamelModel):
+    """Payment configuration for a contestant's event."""
+    minimum_payment: float = Field(..., description="Minimum payment amount")
+    vote_price: float = Field(..., description="Cost per vote")
+    currency: str = Field(default="USD", description="Currency code")
+    event_name: Optional[str] = Field(None, description="Event name")
+    voting_open: bool = Field(..., description="Whether voting is currently open")
+    event_id: Optional[str] = Field(None, description="Event ID")
 
 class PaymentResponse(CamelModel):
     id: str

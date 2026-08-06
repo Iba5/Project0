@@ -1,7 +1,10 @@
 # pyright: reportMissingTypeStubs=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportAttributeAccessIssue=false
+import hashlib
+import hmac
 import logging
 from decimal import Decimal
 from typing import Dict, Any
+from urllib.parse import unquote
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -161,9 +164,6 @@ class PaynowClient:
         IMPORTANT: Do NOT sort keys - concatenate values in their original order
         IMPORTANT: Do NOT URL encode values if from form post (already decoded)
         """
-        import hashlib
-        from urllib.parse import unquote
-        
         # Concatenate values in original order, excluding 'hash' field
         values_chain = ""
         for key, value in fields.items():
@@ -207,8 +207,10 @@ class PaynowClient:
 
         expected_hash = self.generate_signature(fields)
         
-        # Case-insensitive comparison for robustness, but both should be uppercase
-        if expected_hash.upper() != incoming_hash.upper():
+        # Security Fix: Use constant-time comparison to prevent timing attacks
+        # Standard string comparison (==) is vulnerable to timing attacks where
+        # an attacker can iteratively forge signatures by measuring response times
+        if not hmac.compare_digest(expected_hash.upper(), incoming_hash.upper()):
             logger.error(
                 f"Paynow callback REJECTED: hash mismatch. "
                 f"Expected: {expected_hash[:16]}..., Got: {incoming_hash[:16]}..."

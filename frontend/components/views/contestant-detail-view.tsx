@@ -21,15 +21,6 @@ import {
   Users,
   Zap,
 } from 'lucide-react'
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip as RechartsTooltip,
-  ResponsiveContainer,
-} from 'recharts'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -45,11 +36,6 @@ import {
 } from '@/lib/api'
 import { useRealtime, type VoteUpdateData } from '@/hooks/use-realtime'
 import { useIsMobile } from '@/hooks/use-mobile'
-import { useChartTheme } from '@/lib/chart-theme'
-import {
-  getParticipantVoteHistory,
-  type VoteHistoryPoint,
-} from '@/lib/analytics-api'
 import { ParticipantAvatar } from '@/components/shared/participant-avatar'
 import { QuickVoteDialog } from '@/components/shared/quick-vote-dialog'
 import { ShareModal } from '@/components/shared/share-modal'
@@ -123,193 +109,6 @@ function MiniConfettiBurst({ active }: { active: boolean }) {
   )
 }
 
-// Custom tooltip for the vote-history chart (dark-card styled)
-type RechartsTooltipProps = {
-  active?: boolean
-  payload?: Array<{ payload: VoteHistoryPoint }>
-}
-function VoteHistoryTooltip({ active, payload }: RechartsTooltipProps) {
-  if (!active || !payload || payload.length === 0) return null
-  const point = payload[0].payload
-  return (
-    <div className="dark-card border border-gold-500/30 rounded-lg px-3 py-2 shadow-xl">
-      <div className="text-[10px] text-muted-foreground mb-1.5 font-medium">
-        {new Date(point.date).toLocaleDateString('en-US', {
-          month: 'short',
-          day: 'numeric',
-          year: 'numeric',
-        })}
-      </div>
-      <div className="flex items-center gap-1.5 text-xs">
-        <Vote className="size-3 text-gold-400" />
-        <span className="font-bold text-gold-300">{point.votes}</span>
-        <span className="text-muted-foreground">new votes</span>
-      </div>
-      <div className="flex items-center gap-1.5 text-xs mt-0.5">
-        <TrendingUp className="size-3 text-gold-400" />
-        <span className="font-bold text-white">{point.cumulative.toLocaleString()}</span>
-        <span className="text-muted-foreground">cumulative</span>
-      </div>
-    </div>
-  )
-}
-
-// Vote Growth chart card — fetches via prop, handles empty state gracefully
-function VoteHistoryChart({
-  history,
-  loading,
-  days,
-  onDaysChange,
-  chartTheme,
-  isMobile,
-}: {
-  history: VoteHistoryPoint[]
-  loading: boolean
-  days: 7 | 30
-  onDaysChange: (d: 7 | 30) => void
-  chartTheme: ReturnType<typeof useChartTheme>
-  isMobile: boolean
-}) {
-  const hasData = history.length > 0
-  // Show ~6 evenly-spaced date ticks for 30d, ~3 for 7d
-  const tickInterval = hasData
-    ? Math.max(0, Math.floor(history.length / (days === 7 ? 3 : 6)) - 1)
-    : 0
-
-  // On mobile with no data, show a compact message instead of the chart
-  if (isMobile && !loading && !hasData) {
-    return (
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-        className="dark-card rounded-xl p-4 space-y-3"
-      >
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-            <TrendingUp className="size-4 text-gold-500" />
-            Vote History
-          </h3>
-        </div>
-        <div className="h-[80px] flex flex-col items-center justify-center text-center">
-          <TrendingUp className="size-6 text-muted-foreground/40 mb-1" />
-          <p className="text-xs text-muted-foreground font-medium">No vote history yet</p>
-        </div>
-      </motion.div>
-    )
-  }
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4 }}
-      className="dark-card rounded-xl p-4 space-y-3"
-    >
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-          <TrendingUp className="size-4 text-gold-500" />
-          Vote History
-        </h3>
-        <div className="flex items-center gap-2">
-          {hasData && (
-            <Badge className="bg-gold-500/10 text-gold-300 border-gold-500/20 text-[10px]">
-              {history.length} days
-            </Badge>
-          )}
-          {/* 7d / 30d Toggle */}
-          <div className="flex items-center rounded-full bg-surface p-0.5 border border-border">
-            <button
-              onClick={() => onDaysChange(7)}
-              className={`px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all duration-200 ${
-                days === 7
-                  ? 'bg-gold-500 text-[#0B0F17] shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              7d
-            </button>
-            <button
-              onClick={() => onDaysChange(30)}
-              className={`px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all duration-200 ${
-                days === 30
-                  ? 'bg-gold-500 text-[#0B0F17] shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              30d
-            </button>
-          </div>
-        </div>
-      </div>
-      {loading ? (
-        <Skeleton className="h-[200px] w-full bg-surface rounded-lg" />
-      ) : !hasData ? (
-        <div className="h-[200px] flex flex-col items-center justify-center text-center">
-          <TrendingUp className="size-8 text-muted-foreground/40 mb-2" />
-          <p className="text-sm text-muted-foreground font-medium">No vote history yet</p>
-          <p className="text-xs text-muted-foreground/60 mt-1">
-            Be the first to vote for this performer!
-          </p>
-        </div>
-      ) : (
-        <motion.div
-          key={days}
-          initial={{ opacity: 0, scale: 0.96 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.5, ease: 'easeOut' }}
-          className={`w-full ${isMobile ? 'h-[160px]' : 'h-[200px]'}`}
-        >
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={history} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
-              <defs>
-                <linearGradient id="voteGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={chartTheme.accent} stopOpacity={0.5} />
-                  <stop offset="95%" stopColor={chartTheme.accent} stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
-              <XAxis
-                dataKey="date"
-                stroke={chartTheme.tick}
-                tick={{ fontSize: 10, fill: chartTheme.tick }}
-                tickFormatter={(v: string) => {
-                  const d = new Date(v)
-                  return `${d.getMonth() + 1}/${d.getDate()}`
-                }}
-                interval={tickInterval}
-                tickLine={false}
-                axisLine={false}
-              />
-              <YAxis
-                stroke={chartTheme.tick}
-                tick={{ fontSize: 10, fill: chartTheme.tick }}
-                tickLine={false}
-                axisLine={false}
-                width={40}
-              />
-              <RechartsTooltip content={<VoteHistoryTooltip />} />
-              <Area
-                type="monotone"
-                dataKey="cumulative"
-                stroke={chartTheme.accent}
-                strokeWidth={2}
-                fill="url(#voteGradient)"
-                activeDot={{
-                  r: 4,
-                  fill: '#FCD34D',
-                  stroke: chartTheme.tooltipBg,
-                  strokeWidth: 2,
-                }}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </motion.div>
-      )}
-    </motion.div>
-  )
-}
-
 export default function ContestantDetailView({ participantId }: { participantId: string }) {
   const router = useRouter()
   const selectedParticipantId = participantId
@@ -327,11 +126,6 @@ export default function ContestantDetailView({ participantId }: { participantId:
   const [leaderboard, setLeaderboard] = useState<PublicLeaderboardEntry[]>([])
   const [related, setRelated] = useState<PublicParticipant[]>([])
   const [showBackToTop, setShowBackToTop] = useState(false)
-
-  // Vote-history analytics (Last 30 Days chart)
-  const [voteHistory, setVoteHistory] = useState<VoteHistoryPoint[]>([])
-  const [historyLoading, setHistoryLoading] = useState(true)
-  const [historyDays, setHistoryDays] = useState<7 | 30>(30)
 
   // Track previous vote count to detect increases for the gold-glow flash
   const prevVotesRef = useRef<number | null>(null)
@@ -366,7 +160,6 @@ export default function ContestantDetailView({ participantId }: { participantId:
 
   // 1. Real-time vote updates via WebSocket (with fallback polling at 30s)
   const { joinParticipant, leaveParticipant, onVoteUpdate } = useRealtime()
-  const chartTheme = useChartTheme()
 
   useEffect(() => {
     if (!selectedParticipantId) return
@@ -478,28 +271,6 @@ export default function ContestantDetailView({ participantId }: { participantId:
       cancelled = true
     }
   }, [participant])
-
-  // 7. Fetch vote-history analytics when participant or days range changes
-  useEffect(() => {
-    if (!participant) return
-    let cancelled = false
-    queueMicrotask(() => {
-      setHistoryLoading(true)
-    })
-    getParticipantVoteHistory(participant.id, historyDays)
-      .then((res) => {
-        if (!cancelled) setVoteHistory(res.history)
-      })
-      .catch(() => {
-        if (!cancelled) setVoteHistory([])
-      })
-      .finally(() => {
-        if (!cancelled) setHistoryLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [participant?.id, historyDays])
 
   // 6. Scroll listener for "Back to top" button
   useEffect(() => {
@@ -866,16 +637,6 @@ export default function ContestantDetailView({ participantId }: { participantId:
                 )}
               </div>
             )}
-
-            {/* Vote Growth Chart — Last 30 Days */}
-            <VoteHistoryChart
-              history={voteHistory}
-              loading={historyLoading}
-              days={historyDays}
-              onDaysChange={setHistoryDays}
-              chartTheme={chartTheme}
-              isMobile={isMobile}
-            />
 
             {/* Performance Details */}
             <div className="dark-card rounded-xl p-4 space-y-3">

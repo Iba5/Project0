@@ -1121,10 +1121,33 @@ class PaymentService:
         if not payment_method_config or not payment_method_config.is_enabled:
             raise PaymentException(f"Payment method '{payment_in.payment_method}' is not available or has been disabled.")
 
+        # 1e. Validate amount against event minimum
+        evt_id = payment_in.event_id
+        vote_price = None
+        
+        # Get event vote price
+        if hasattr(part, 'event_id') and part.event_id:
+            event = self.event_repo.get_by_id(part.event_id)
+            if event and event.vote_price:
+                vote_price = event.vote_price
+                evt_id = part.event_id
+        
+        if not vote_price:
+            vote_price = settings.MIN_PAYMENT_AMOUNT
+
+        vote_price = Decimal(str(vote_price))
+        
+        # Ensure the amount meets the minimum requirement
+        payment_amount = Decimal(str(payment_in.amount))
+        if payment_amount < vote_price:
+            raise PaymentException(
+                f"Minimum payment amount is ${vote_price:.2f}. Please increase your contribution."
+            )
+
         # 2. Duplicate voter check
         voter_check = self.check_voter_duplicate(
             payment_in.voter_phone,
-            payment_in.event_id
+            evt_id
         )
 
         if voter_check.has_voted and not payment_in.acknowledge_duplicate:
@@ -1170,34 +1193,13 @@ class PaymentService:
         # 6. Generate reference
         reference = f"VOTE-{uuid.uuid4().hex[:8].upper()}"
 
-        # 7. Resolve event_id and vote price with fallback chain
-        evt_id = payment_in.event_id
-        vote_price = None
-        
-        # Priority: Event vote_price → Global minimum
-        if hasattr(part, 'event_id') and part.event_id:
-            event = self.event_repo.get_by_id(part.event_id)
-            if event and event.vote_price:
-                vote_price = event.vote_price
-                evt_id = part.event_id
-        
-        if not vote_price:
-            vote_price = settings.MIN_PAYMENT_AMOUNT
-
-        vote_price = Decimal(str(vote_price))
-        
-        # Ensure the amount meets the minimum requirement
-        if vote_price < settings.MIN_PAYMENT_AMOUNT:
-            vote_price = settings.MIN_PAYMENT_AMOUNT
-            logger.info(f"Adjusted vote_price to minimum ${vote_price} for contestant {part.id}")
-
-        # 8. TEST MODE: Create test payment without Paynow
+        # 7. TEST MODE: Create test payment without Paynow
         if self.test_mode:
             return self._initiate_test_payment(
                 payment_in, part, reference, vote_price, evt_id, idempotency_key
             )
 
-        # 9. PRODUCTION MODE: Continue with real Paynow flow
+        # 8. PRODUCTION MODE: Continue with real Paynow flow
         return self._initiate_real_payment(
             payment_in, part, reference, vote_price, evt_id, idempotency_key
         )
@@ -1213,10 +1215,13 @@ class PaymentService:
         """
         test_redirect_url = f"{settings.FRONTEND_URL}/payments/test/{reference}"
         
+        # Use the actual payment amount from the request
+        payment_amount = Decimal(str(payment_in.amount))
+        
         test_payment = TestPayment(
             reference=reference,
             contestant_id=part.id,
-            amount=vote_price,
+            amount=payment_amount,
             payment_method=payment_in.payment_method,
             status="created",
             voter_phone=payment_in.voter_phone,
@@ -1248,8 +1253,8 @@ class PaymentService:
         return PaymentInitiationResponse(
             id=test_payment.id,
             reference=test_payment.reference,
-            redirect_url=test_payment.paynow_redirect_url,
-            poll_url=test_payment.poll_url,
+            redirect_url=test_payment.test_redirect_url,  # Fixed: TestPayment uses test_redirect_url
+            poll_url=None,  # Fixed: TestPayment does not have poll_url
             amount=str(test_payment.amount),
             payment_method=test_payment.payment_method,
             status=test_payment.status,
@@ -1271,11 +1276,14 @@ class PaymentService:
         # 10. Determine payment type (web vs mobile)
         is_mobile = payment_in.payment_method.lower() in ("ecocash", "onemoney")
 
-        # 11. Create local payment record with SERVER-DETERMINED amount
+        # 11. Use the actual payment amount from the request
+        payment_amount = Decimal(str(payment_in.amount))
+
+        # 12. Create local payment record with the actual amount
         pending_payment = Payment(
             reference=reference,
             contestant_id=part.id,
-            amount=vote_price,
+            amount=payment_amount,
             payment_method=payment_in.payment_method,
             status=PaymentStatus.CREATED,
             voter_phone=payment_in.voter_phone,
@@ -1288,7 +1296,7 @@ class PaymentService:
             pending_payment.idempotency_key = idempotency_key
         # Don't commit yet — we'll commit after Paynow confirms creation
 
-        # 12. Call Paynow SDK with SERVER-DETERMINED amount
+        # 13. Call Paynow SDK with the actual payment amount
         item_name = f"Vote for {part.name}"
         voter_email = payment_in.voter_email or "voter@example.com"
 
@@ -1298,7 +1306,7 @@ class PaymentService:
                     reference=reference,
                     email=voter_email,
                     item_name=item_name,
-                    amount=vote_price,
+                    amount=payment_amount,
                     phone=payment_in.voter_phone,
                     method=payment_in.payment_method.lower(),
                 )
@@ -1428,7 +1436,10 @@ class PaymentService:
 
         # --- 5. ACID Transaction Block ---
         try:
-            if paynow_status is not None and paynow_status.lower() in ("paid", "successful"):
+            # Paynow documentation: "Paid", "Awaiting Delivery", and "Delivered" are all successful payment statuses
+            # Reference: https://developers.paynow.co.zw/docs/paynow/status_update/
+            normalized_status = str(paynow_status).lower() if paynow_status else ""
+            if normalized_status in ("paid", "successful", "awaiting delivery", "delivered"):
                 # H3 FIX: Compute votes_to_add BEFORE fraud check.
                 # Previously used int(payment.amount) — a monetary value —
                 # compared against MAX_VOTES_PER_TRANSACTION.
@@ -1528,14 +1539,13 @@ class PaymentService:
         Uses select_for_update() to prevent concurrent requests from
         crediting the same vote twice (H5 race condition fix).
         """
-        payment = self.payment_repo.get_by_reference(reference)
+        # Fix: Acquire lock on initial query to prevent race condition with callback
+        payment = self.db.execute(
+            select(Payment).where(Payment.reference == reference).with_for_update()
+        ).scalar_one_or_none()
+        
         if not payment:
             raise NotFoundException(f"Payment reference {reference} not found")
-
-        # Re-fetch with row-level lock for PostgreSQL (no-op on SQLite but harmless)
-        payment = self.db.execute(
-            select(Payment).where(Payment.id == payment.id).with_for_update()
-        ).scalar_one()
 
         # If already in a final state, return immediately
         if payment.status in (PaymentStatus.PAID, PaymentStatus.FAILED, PaymentStatus.CANCELLED, PaymentStatus.REFUNDED, PaymentStatus.EXPIRED):
@@ -1556,7 +1566,7 @@ class PaymentService:
                         if payment.event_id:
                             event = self.event_repo.get_by_id(payment.event_id)
                             if event:
-                                votes_to_add = event.votes_per_payment
+                                votes_to_add = event.votes_per_payment or 1  # Fixed: Null safety fallback
 
                         payment.status = PaymentStatus.PAID
 

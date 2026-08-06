@@ -10,6 +10,7 @@ from app.core.database import get_db
 from app.api.v1.dependencies import PermissionChecker, PaginationParams, get_current_active_user
 from app.enums.enums import Permission
 from app.services.services import PaymentService, DashboardService
+from app.exceptions.exceptions import VotingException, NotFoundException
 from app.schemas.schemas import (
     PaymentCreate, PaymentEnvelopeResponse, PaymentInitiationResponse, PaymentResponse, PaymentSummaryResponse,
     VoterCheckResponse, VoterDetailsUpdate, PaymentStatusCheckResponse,
@@ -180,7 +181,21 @@ async def paynow_callback(
             detail="Missing required 'status' field in callback."
         )
     
-    payment_service.process_paynow_callback(callback_data)
+    # Fix: Wrap in try/except to prevent Paynow retry loops on exceptions
+    # Paynow retries on HTTP error status codes (up to 10 times)
+    # We always return 200 to acknowledge receipt, even if processing fails
+    try:
+        payment_service.process_paynow_callback(callback_data)
+    except (VotingException, NotFoundException) as e:
+        # Log the error but return 200 to prevent Paynow retries
+        logger.error(f"Callback processing error (domain exception): {str(e)}")
+        # Still return 200 - we've logged the error and can investigate
+        # The payment can be manually verified via poll_url
+    except Exception as e:
+        # Log unexpected errors but return 200 to prevent Paynow retries
+        logger.error(f"Callback processing error (unexpected): {str(e)}", exc_info=True)
+        # Still return 200 - we've logged the error and can investigate
+    
     return CallbackAckResponse(status="ok")
 
 
