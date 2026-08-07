@@ -1455,79 +1455,8 @@ class PaymentService:
             logger.info(f"Processing payment with normalized status: {normalized_status}")
             if normalized_status in ("paid", "successful", "awaiting delivery", "delivered"):
                 logger.info(f"✅ Payment successful - proceeding to credit votes for reference: {reference}")
-                # Calculate votes using centralized helper: floor(amount / votePrice)
-                from app.utils.payment_utils import resolve_vote_price, calculate_votes_from_amount
-                
-                event_vote_price = None
-                if payment.event_id:
-                    event = self.event_repo.get_by_id(payment.event_id)
-                    if event:
-                        event_vote_price = event.vote_price
-                
-                vote_price = resolve_vote_price(event_vote_price)
-                votes_to_add = calculate_votes_from_amount(payment.amount, vote_price)
-                logger.info(f"Calculated votes to add: {votes_to_add} for amount: {payment.amount} with vote price: {vote_price}")
-
-                if not payment.contestant_id:
-                    logger.error(f"❌ Payment {reference} has no associated contestant; cannot credit votes.")
-                    raise VotingException(
-                        f"Payment {reference} has no associated contestant; cannot credit votes."
-                    )
-
-                # Fraud detection — uses calculated votes from actual amount
-                logger.info(f"Running fraud detection for contestant: {payment.contestant_id} with votes: {votes_to_add}")
-                self.fraud_service.detect_suspicious_voting(payment.contestant_id, votes_to_add)
-
-                # Update payment status
-                logger.info(f"Updating payment status to PAID for payment: {payment.id}")
-                payment.status = PaymentStatus.PAID
-
-                logger.info(f"Creating vote transaction for payment: {payment.id}")
-                vote_txn = VoteTransaction(
-                    payment_id=payment.id,
-                    contestant_id=payment.contestant_id,
-                    votes_awarded=votes_to_add,
-                    event_id=payment.event_id,
-                )
-                self.db.add(vote_txn)
-
-                # H1 FIX: Atomic vote increment via SQL UPDATE.
-                # Previously: contestant.votes += votes_to_add (read-modify-write).
-                # Two concurrent callbacks for the same contestant could both
-                # read votes=100, both write votes=101, losing one vote.
-                logger.info(f"Atomic vote increment for contestant: {payment.contestant_id} by {votes_to_add}")
-                result: CursorResult[Any] = self.db.execute(  # type: ignore[assignment]
-                    sa_update(Participant)
-                    .where(Participant.id == payment.contestant_id,
-                           Participant.deleted_at.is_(None))
-                    .values(votes=Participant.votes + votes_to_add)
-                )
-                if result.rowcount == 0:
-                    logger.error(f"❌ Contestant {payment.contestant_id} not found or soft-deleted. Payment {reference} was paid but no votes were credited.")
-                    raise VotingException(
-                        f"Contestant {payment.contestant_id} not found or soft-deleted. "
-                        f"Payment {reference} was paid but no votes were credited."
-                    )
-
-                logger.info(f"Creating audit log for payment: {payment.id}")
-                audit_entry = AuditLog(
-                    action="Payment Verified",
-                    details=(
-                        f"Credited {votes_to_add} votes to contestant "
-                        f"{payment.contestant_id} on ref {reference}. "
-                        f"Verified via poll_url dual check."
-                    )
-                )
-                self.db.add(audit_entry)
-
-                # COMMIT — atomic
-                logger.info(f"Committing transaction for reference: {reference}")
-                self.db.commit()
-                logger.info(f"✅ SUCCESS: Transaction committed successfully for reference: {reference}.")
-                
-                # Invalidate cache after vote crediting
-                logger.info(f"Invalidating vote cache for contestant: {payment.contestant_id}, event: {payment.event_id}")
-                self._invalidate_vote_cache(payment.contestant_id, payment.event_id)
+                # Call the shared payment completion logic
+                self._process_successful_payment(payment, source="callback")
             else:
                 logger.info(f"Payment status not successful (status: {normalized_status}) - marking as FAILED")
                 payment.status = PaymentStatus.FAILED
@@ -1548,6 +1477,127 @@ class PaymentService:
             raise
         finally:
             logger.info(f"=== Paynow Callback Processing End ===")
+
+    def _process_successful_payment(
+        self, 
+        payment: Payment, 
+        source: str = "unknown"
+    ) -> None:
+        """
+        SHARED PAYMENT COMPLETION LOGIC:
+        
+        This is the SINGLE SOURCE OF TRUTH for processing successful payments.
+        Both callback and polling paths must call this function after confirming
+        that Paynow reports the payment as paid.
+        
+        Responsibilities:
+        - Validate payment state
+        - Calculate votes from amount
+        - Run fraud detection
+        - Update payment status to PAID
+        - Create vote transaction record
+        - Increment contestant votes (atomic SQL)
+        - Create audit log
+        - Invalidate caches
+        - Commit transaction atomically
+        
+        Args:
+            payment: Payment object (already row-locked by caller)
+            source: Identification of caller ("callback" or "polling") for logging
+            
+        Important:
+            - Caller must acquire row lock with select_for_update() before calling
+            - Caller must verify payment is not already in final state
+            - Caller must verify Paynow reports payment as paid
+            - All operations execute in a single database transaction
+        """
+        logger.info(f"=== Process Successful Payment Start (source: {source}) ===")
+        logger.info(f"Processing payment: {payment.reference}, amount: {payment.amount}")
+        
+        # --- 1. Validate payment state ---
+        if not payment.contestant_id:
+            logger.error(f"❌ Payment {payment.reference} has no associated contestant; cannot credit votes.")
+            raise VotingException(
+                f"Payment {payment.reference} has no associated contestant; cannot credit votes."
+            )
+        
+        # --- 2. Calculate votes using centralized helper ---
+        from app.utils.payment_utils import resolve_vote_price, calculate_votes_from_amount
+        
+        event_vote_price = None
+        if payment.event_id:
+            event = self.event_repo.get_by_id(payment.event_id)
+            if event:
+                event_vote_price = event.vote_price
+        
+        vote_price = resolve_vote_price(event_vote_price)
+        votes_to_add = calculate_votes_from_amount(payment.amount, vote_price)
+        logger.info(f"Calculated votes to add: {votes_to_add} for amount: {payment.amount} with vote price: {vote_price}")
+        
+        # --- 3. Fraud detection ---
+        logger.info(f"Running fraud detection for contestant: {payment.contestant_id} with votes: {votes_to_add}")
+        self.fraud_service.detect_suspicious_voting(payment.contestant_id, votes_to_add)
+        
+        # --- 4. Update payment status ---
+        logger.info(f"Updating payment status to PAID for payment: {payment.id}")
+        payment.status = PaymentStatus.PAID
+        
+        # --- 5. Create vote transaction (with idempotency check) ---
+        logger.info(f"Creating vote transaction for payment: {payment.id}")
+        # Check idempotency — has a vote txn already been created?
+        existing_vote = self.vote_repo.get_by_payment_id(payment.id)
+        if not existing_vote:
+            vote_txn = VoteTransaction(
+                payment_id=payment.id,
+                contestant_id=payment.contestant_id,
+                votes_awarded=votes_to_add,
+                event_id=payment.event_id,
+            )
+            self.db.add(vote_txn)
+            
+            # --- 6. Atomic vote increment via SQL UPDATE (only for new transactions) ---
+            logger.info(f"Atomic vote increment for contestant: {payment.contestant_id} by {votes_to_add}")
+            result: CursorResult[Any] = self.db.execute(  # type: ignore[assignment]
+                sa_update(Participant)
+                .where(Participant.id == payment.contestant_id,
+                       Participant.deleted_at.is_(None))
+                .values(votes=Participant.votes + votes_to_add)
+            )
+            if result.rowcount == 0:
+                logger.error(f"❌ Contestant {payment.contestant_id} not found or soft-deleted. Payment {payment.reference} was paid but no votes were credited.")
+                raise VotingException(
+                    f"Contestant {payment.contestant_id} not found or soft-deleted. "
+                    f"Payment {payment.reference} was paid but no votes were credited."
+                )
+            
+            final_votes_awarded = votes_to_add
+        else:
+            logger.info(f"Vote transaction already exists for payment: {payment.id} - payment already processed, skipping vote increment")
+            # Payment already processed, no need to increment votes again
+            final_votes_awarded = existing_vote.votes_awarded
+        
+        # --- 7. Create audit log ---
+        logger.info(f"Creating audit log for payment: {payment.id}")
+        audit_entry = AuditLog(
+            action="Payment Verified",
+            details=(
+                f"Credited {final_votes_awarded} votes to contestant "
+                f"{payment.contestant_id} on ref {payment.reference}. "
+                f"Source: {source}."
+            )
+        )
+        self.db.add(audit_entry)
+        
+        # --- 8. Commit transaction atomically ---
+        logger.info(f"Committing transaction for reference: {payment.reference}")
+        self.db.commit()
+        logger.info(f"✅ SUCCESS: Transaction committed successfully for reference: {payment.reference}.")
+        
+        # --- 9. Invalidate cache after vote crediting ---
+        logger.info(f"Invalidating vote cache for contestant: {payment.contestant_id}, event: {payment.event_id}")
+        self._invalidate_vote_cache(payment.contestant_id, payment.event_id)
+        
+        logger.info(f"=== Process Successful Payment End (source: {source}) ===")
 
     def _invalidate_vote_cache(self, contestant_id: str, event_id: Optional[str] = None):
         """Invalidate participant and leaderboard caches after vote updates."""
@@ -1622,58 +1672,23 @@ class PaymentService:
                 logger.info(f"Poll result for reference {reference}: {poll_result}")
                 if poll_result.get("paid"):
                     logger.info(f"Paynow poll confirms PAID for reference: {reference} - CREDITING VOTES")
-                    # Directly apply the vote in this transaction (skip webhook signature)
+                    # Call the shared payment completion logic
                     try:
-                        # Calculate votes using centralized helper: floor(amount / votePrice)
-                        from app.utils.payment_utils import resolve_vote_price, calculate_votes_from_amount
-                        
-                        event_vote_price = None
-                        if payment.event_id:
-                            event = self.event_repo.get_by_id(payment.event_id)
-                            if event:
-                                event_vote_price = event.vote_price
-                        
-                        vote_price = resolve_vote_price(event_vote_price)
-                        votes_to_add = calculate_votes_from_amount(payment.amount, vote_price)
-                        logger.info(f"Calculated votes to add: {votes_to_add} for amount: {payment.amount} with vote price: {vote_price}")
-
-                        payment.status = PaymentStatus.PAID
-
-                        # Check idempotency — has a vote txn already been created?
-                        existing_vote = self.vote_repo.get_by_payment_id(payment.id)
-                        if not existing_vote:
-                            logger.info(f"Creating new vote transaction for payment: {payment.id}")
-                            vote_txn = VoteTransaction(
-                                payment_id=payment.id,
-                                contestant_id=payment.contestant_id,
-                                votes_awarded=votes_to_add,
-                                event_id=payment.event_id,
-                            )
-                            self.db.add(vote_txn)
-                        else:
-                            logger.info(f"Vote transaction already exists for payment: {payment.id} - skipping creation")
-
-                        # H1 FIX: Same atomic SQL UPDATE as callback path
-                        if payment.contestant_id:
-                            logger.info(f"Incrementing contestant votes for contestant: {payment.contestant_id} by {votes_to_add}")
-                            self.db.execute(
-                                sa_update(Participant)
-                                .where(Participant.id == payment.contestant_id,
-                                       Participant.deleted_at.is_(None))
-                                .values(votes=Participant.votes + votes_to_add)
-                            )
-
-                        self.db.commit()
-                        logger.info(f"✅ SUCCESS: Manual poll confirmed PAID for ref: {reference} - Votes credited and committed")
+                        self._process_successful_payment(payment, source="polling")
                         
                         # Fetch contestant details for response
                         contestant_name = None
                         current_total_votes = None
+                        votes_awarded = None
                         if payment.contestant_id:
                             contestant = self.part_repo.get_by_id(payment.contestant_id)
                             if contestant:
                                 contestant_name = contestant.name
                                 current_total_votes = contestant.votes
+                            # Get votes awarded from vote transaction
+                            vote_txn = self.vote_repo.get_by_payment_id(payment.id)
+                            if vote_txn:
+                                votes_awarded = vote_txn.votes_awarded
                     except Exception as e:
                         logger.error(f"❌ ERROR: Failed to credit votes during manual poll for ref: {reference}: {str(e)}")
                         self.db.rollback()
@@ -1687,7 +1702,7 @@ class PaymentService:
                         contestant_id=payment.contestant_id,
                         contestant_name=contestant_name,
                         amount=str(payment.amount) if payment.amount else None,
-                        votes_awarded=votes_to_add,
+                        votes_awarded=votes_awarded,
                         current_total_votes=current_total_votes
                     )
             except Exception as e:

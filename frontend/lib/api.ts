@@ -377,6 +377,9 @@ export interface PaymentItem {
   voterEmail: string | null
   date: string
   createdAt: string
+  pollUrl?: string | null
+  paynowRedirectUrl?: string | null
+  instructions?: string | null
 }
 
 export async function listPayments(params?: { status?: string; eventId?: string }): Promise<{ items: PaymentItem[]; payments: PaymentItem[]; pagination: PaginationInfo }> {

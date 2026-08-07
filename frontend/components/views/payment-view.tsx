@@ -491,16 +491,44 @@ export default function PaymentView({ participantId }: { participantId: string }
         idempotencyKey: idempotencyKey,
       })
 
-      if (result.payment.paynowRedirectUrl) {
+      // Handle mobile money payments with instructions
+      if (result.payment.instructions) {
+        // Mobile money payment - show instructions and redirect to status page
+        setPaymentInitiated(true)
+        setCompletedSteps([1, 2, 3, 4])
+        
+        toast.success('Payment initiated successfully!', {
+          description: `Follow the instructions to complete your mobile money payment. Reference: ${result.payment.reference}`,
+        })
+        
+        // Redirect to status page to show payment status and allow manual polling
+        setTimeout(() => {
+          router.push(`/payments/status?reference=${result.payment.reference}`)
+        }, 2000)
+      } else if (result.payment.paynowRedirectUrl) {
+        // Web payment - open redirect URL and go to status page
         window.open(result.payment.paynowRedirectUrl, '_blank')
+        
+        setPaymentInitiated(true)
+        setCompletedSteps([1, 2, 3, 4])
+
+        toast.success('Payment initiated successfully!', {
+          description: `Complete payment in the Paynow window. You'll be redirected to the status page. Reference: ${result.payment.reference}`,
+        })
+        
+        // Redirect to status page for polling
+        setTimeout(() => {
+          router.push(`/payments/status?reference=${result.payment.reference}`)
+        }, 2000)
+      } else {
+        // Fallback - just show initiated state
+        setPaymentInitiated(true)
+        setCompletedSteps([1, 2, 3, 4])
+
+        toast.success('Payment initiated successfully!', {
+          description: `Reference: ${result.payment.reference}`,
+        })
       }
-
-      setPaymentInitiated(true)
-      setCompletedSteps([1, 2, 3, 4])
-
-      toast.success('Payment initiated successfully!', {
-        description: `Complete payment in the Paynow window. You'll be redirected here after payment. Reference: ${result.payment.reference}`,
-      })
     } catch (err) {
       toast.error('Payment failed', {
         description: err instanceof Error ? err.message : 'Please try again',

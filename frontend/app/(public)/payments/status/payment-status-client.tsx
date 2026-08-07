@@ -32,10 +32,10 @@ export default function PaymentStatusClient() {
       return
     }
 
-    // Poll every 3 seconds for pending payments
+    // Poll every 2 seconds for pending payments (more frequent for better UX)
     const interval = setInterval(() => {
       fetchStatus()
-    }, 3000)
+    }, 2000)
 
     return () => clearInterval(interval)
   }, [statusData])
@@ -152,7 +152,7 @@ export default function PaymentStatusClient() {
         return 'You cancelled the payment. No charges were made.'
       case 'pending':
       case 'created':
-        return 'Your payment is being processed. This page will update automatically.'
+        return 'Your payment is being processed. This page will update automatically. If you completed mobile money payment, wait a moment for confirmation.'
       default:
         return 'Please check your payment status later.'
     }
