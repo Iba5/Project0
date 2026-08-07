@@ -1065,9 +1065,13 @@ class PaymentService:
         self, phone: str, event_id: Optional[str] = None
     ) -> VoterCheckResponse:
         """
-        PRE-PAYMENT CHECK: Detects if a phone number has already successfully
-        voted in the current (or specified) event.
-        Returns a warning if duplicate detected.
+        PRE-PAYMENT CHECK: Voting is unlimited — a phone number may pay and
+        vote as many times as it likes in an event. The only thing this
+        blocks is starting a NEW payment while a PREVIOUS payment from the
+        same phone in the same event is still unresolved (created/pending/
+        processing). Once that prior attempt reaches any terminal state —
+        paid, failed, or cancelled — this phone is free to pay again
+        immediately, with no cap.
         """
         # Resolve event
         evt_id = event_id
@@ -1084,19 +1088,19 @@ class PaymentService:
                 message="No active event found. Proceeding without duplicate check."
             )
 
-        # Check for successful payments by this phone in this event
-        existing = self.payment_repo.get_by_voter_phone_and_event(phone, evt_id)
+        # Check for a still-unresolved payment by this phone in this event
+        unresolved = self.payment_repo.get_unresolved_by_voter_phone_and_event(phone, evt_id)
 
-        if existing:
+        if unresolved:
             return VoterCheckResponse(
                 has_voted=True,
-                message="Duplicate voter detected.",
-                warning="You have already voted in this event. Continue only if you are paying for someone else."
+                message="Previous payment still pending.",
+                warning="You have a payment still being processed for this event. Please wait for it to complete before starting another."
             )
 
         return VoterCheckResponse(
             has_voted=False,
-            message="No previous votes found. You may proceed."
+            message="No unresolved payments found. You may proceed."
         )
 
     def _rate_limit_check(self, phone: str) -> None:
@@ -1195,14 +1199,19 @@ class PaymentService:
                 f"Minimum amount is ${vote_price:.2f} for one vote."
             )
 
-        # 2. Duplicate voter check
+        # 2. Unresolved-payment check. This is a HARD block, not a
+        # dismissible warning: acknowledge_duplicate does NOT bypass it.
+        # Letting a phone stack a second payment while the first is still
+        # unresolved would defeat the point of this check and duplicate
+        # what the rate limiter below already guards against. Voting
+        # itself is unlimited once the prior attempt has actually
+        # resolved (paid, failed, or cancelled) — nothing to acknowledge.
         voter_check = self.check_voter_duplicate(
             payment_in.voter_phone,
             evt_id
         )
 
-        if voter_check.has_voted and not payment_in.acknowledge_duplicate:
-            # Return the warning but do NOT proceed with payment
+        if voter_check.has_voted:
             return PaymentInitiationResponse(
                 warning=voter_check.warning,
                 has_voted=True,
@@ -1457,6 +1466,24 @@ class PaymentService:
                 logger.info(f"✅ Payment successful - proceeding to credit votes for reference: {reference}")
                 # Call the shared payment completion logic
                 self._process_successful_payment(payment, source="callback")
+            elif normalized_status == "cancelled":
+                # Distinct from a generic failure — the voter deliberately
+                # backed out of the mobile money prompt (e.g. Paynow's
+                # sandbox test number 0773333333). The frontend shows a
+                # different, reassuring message for this case ("you
+                # cancelled, no charges made") vs. a genuine failure
+                # ("contact support"), so the two must not be conflated.
+                logger.info(f"Payment cancelled by user - marking as CANCELLED for reference: {reference}")
+                payment.status = PaymentStatus.CANCELLED
+
+                audit_entry = AuditLog(
+                    action="Payment Cancelled",
+                    details=f"Payment reference {reference} was cancelled by the voter."
+                )
+                self.db.add(audit_entry)
+                logger.info(f"Committing CANCELLED status for reference: {reference}")
+                self.db.commit()
+                logger.info(f"✅ Payment marked as CANCELLED for reference: {reference}")
             else:
                 logger.info(f"Payment status not successful (status: {normalized_status}) - marking as FAILED")
                 payment.status = PaymentStatus.FAILED
@@ -1704,6 +1731,29 @@ class PaymentService:
                         amount=str(payment.amount) if payment.amount else None,
                         votes_awarded=votes_awarded,
                         current_total_votes=current_total_votes
+                    )
+                elif str(poll_result.get("status", "")).lower() == "cancelled":
+                    # Distinct from a generic failure — mirrors the callback
+                    # path's handling. Without this branch, a user-cancelled
+                    # mobile money prompt (e.g. Paynow sandbox test number
+                    # 0773333333) would poll forever showing "Pending" since
+                    # nothing here previously updated payment.status away
+                    # from its initial PENDING value.
+                    logger.info(f"Paynow poll confirms CANCELLED for reference: {reference}")
+                    payment.status = PaymentStatus.CANCELLED
+                    audit_entry = AuditLog(
+                        action="Payment Cancelled",
+                        details=f"Payment reference {reference} was cancelled by the voter (detected via polling)."
+                    )
+                    self.db.add(audit_entry)
+                    self.db.commit()
+                    logger.info(f"Returning CANCELLED status for reference: {reference}")
+                    return PaymentStatusCheckResponse(
+                        reference=reference,
+                        status=PaymentStatus.CANCELLED,
+                        paid=False,
+                        contestant_id=payment.contestant_id,
+                        amount=str(payment.amount) if payment.amount else None,
                     )
             except Exception as e:
                 logger.warning(f"Manual status check failed for {reference}: {str(e)}")

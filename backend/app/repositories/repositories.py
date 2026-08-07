@@ -242,12 +242,28 @@ class PaymentRepository(BaseRepository[Payment]):
     def get_by_voter_phone_and_event(self, phone: str, event_id: str) -> List[Payment]:
         """
         Find all successful payments by a voter phone in a specific event.
-        Used for duplicate voter detection.
+        Retained for reporting/analytics use; no longer used to block new
+        votes (voting is unlimited once a prior payment has resolved).
         """
         return self.db.query(Payment).filter(
             Payment.voter_phone == phone,
             Payment.event_id == event_id,
             Payment.status == PaymentStatus.PAID
+        ).all()
+
+    def get_unresolved_by_voter_phone_and_event(self, phone: str, event_id: str) -> List[Payment]:
+        """
+        Find payments by this voter phone in this event that have not yet
+        reached a terminal state (paid, failed, cancelled, refunded,
+        expired). Used to block starting a NEW payment while a previous
+        one from the same phone is still genuinely unresolved — voting
+        itself is unlimited; this only prevents a second payment from
+        being created while the first hasn't finished either way.
+        """
+        return self.db.query(Payment).filter(
+            Payment.voter_phone == phone,
+            Payment.event_id == event_id,
+            Payment.status.in_([PaymentStatus.CREATED, PaymentStatus.PENDING, PaymentStatus.PROCESSING])
         ).all()
 
     def get_by_event(self, event_id: str) -> List[Payment]:

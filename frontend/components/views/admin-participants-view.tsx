@@ -474,6 +474,14 @@ function MobileParticipantCard({
   )
 }
 
+// Parses a Cheat Mode vote-count input as a non-negative integer, or null if invalid.
+function parseNonNegativeInt(value: string): number | null {
+  const trimmed = value.trim()
+  if (!/^\d+$/.test(trimmed)) return null
+  const parsed = Number(trimmed)
+  return Number.isSafeInteger(parsed) ? parsed : null
+}
+
 export function AdminParticipantsView() {
   const router = useRouter()
   const isMobile = useIsMobile()
@@ -487,6 +495,9 @@ export function AdminParticipantsView() {
   const [editOpen, setEditOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<ParticipantItem | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [cheatTarget, setCheatTarget] = useState<ParticipantItem | null>(null)
+  const [cheatVoteCount, setCheatVoteCount] = useState('')
+  const [cheatSubmitting, setCheatSubmitting] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
@@ -501,6 +512,16 @@ export function AdminParticipantsView() {
   useEffect(() => {
     setSelectedIds(new Set())
   }, [search, statusFilter])
+
+  // Seed the Cheat Mode vote-count field with the participant's current
+  // votes whenever the dialog opens for a new target.
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (cheatTarget) {
+      setCheatVoteCount(String(cheatTarget.votes))
+    }
+  }, [cheatTarget])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const fetchParticipants = useCallback(async () => {
     try {
@@ -656,25 +677,20 @@ export function AdminParticipantsView() {
     }
   }
 
-  const handleCheatMode = (p: ParticipantItem) => {
-    const newVoteCount = prompt(`Cheat Mode: Enter new vote count for ${p.name}\nCurrent votes: ${p.votes}`)
-    if (newVoteCount === null) return // User cancelled
-    
-    const voteCount = parseInt(newVoteCount)
-    if (isNaN(voteCount) || voteCount < 0) {
-      toast.error('Invalid vote count. Please enter a non-negative number.')
-      return
-    }
-    
-    if (confirm(`Are you sure you want to change ${p.name}'s votes from ${p.votes} to ${voteCount}?`)) {
-      manipulateVotes(p.id, voteCount)
-        .then((result) => {
-          toast.success(result.message)
-          fetchParticipants() // Refresh to show updated votes
-        })
-        .catch((err) => {
-          toast.error(err instanceof Error ? err.message : 'Failed to manipulate votes')
-        })
+  const handleCheatModeSubmit = async () => {
+    if (!cheatTarget) return
+    const voteCount = parseNonNegativeInt(cheatVoteCount)
+    if (voteCount === null) return
+    setCheatSubmitting(true)
+    try {
+      const result = await manipulateVotes(cheatTarget.id, voteCount)
+      toast.success(result.message)
+      setCheatTarget(null)
+      fetchParticipants() // Refresh to show updated votes
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to manipulate votes')
+    } finally {
+      setCheatSubmitting(false)
     }
   }
 
@@ -799,6 +815,9 @@ export function AdminParticipantsView() {
   // Active filters (for empty-state copy)
   const hasActiveFilters =
     statusFilter !== 'all' || search.trim() !== ''
+
+  const parsedCheatVoteCount = parseNonNegativeInt(cheatVoteCount)
+  const cheatVoteCountInvalid = cheatVoteCount.trim() !== '' && parsedCheatVoteCount === null
 
   return (
     <div className="space-y-6 p-6">
@@ -1107,7 +1126,7 @@ export function AdminParticipantsView() {
                                 variant="ghost"
                                 size="icon"
                                 className="h-8 w-8 hover:bg-purple-500/10"
-                                onClick={() => handleCheatMode(p)}
+                                onClick={() => setCheatTarget(p)}
                               >
                                 <Ghost className="w-4 h-4" style={{ color: '#8B5CF6' }} />
                               </Button>
@@ -1164,7 +1183,7 @@ export function AdminParticipantsView() {
                   onDelete={setDeleteTarget}
                   onCopyLink={handleCopyParticipantLink}
                   onViewPublic={handleViewPublic}
-                  onCheatMode={handleCheatMode}
+                  onCheatMode={setCheatTarget}
                   isSuperAdmin={isSuperAdmin}
                   events={events}
                 />
@@ -1379,6 +1398,68 @@ export function AdminParticipantsView() {
               style={{ background: '#EF4444', color: '#FFFFFF' }}
             >
               {deleting ? 'Deleting…' : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Cheat Mode Dialog */}
+      <AlertDialog open={!!cheatTarget} onOpenChange={(open) => {
+        if (!open) setCheatTarget(null)
+      }}>
+        <AlertDialogContent
+          style={{
+            background: 'var(--surface-1)',
+            borderColor: 'var(--border-subtle)',
+            color: 'var(--text-primary)',
+          }}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle style={{ color: 'var(--text-primary)' }}>Cheat Mode</AlertDialogTitle>
+            <AlertDialogDescription style={{ color: 'var(--text-muted)' }}>
+              Manually override the vote count for{' '}
+              <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>
+                {cheatTarget?.name}
+              </span>
+              . Current votes:{' '}
+              <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>
+                {cheatTarget?.votes}
+              </span>
+              .
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2 py-2">
+            <Label style={{ color: 'var(--text-muted)' }}>New vote count</Label>
+            <Input
+              type="number"
+              min={0}
+              step={1}
+              value={cheatVoteCount}
+              onChange={(e) => setCheatVoteCount(e.target.value)}
+              className="rounded-xl border-none"
+              style={{ background: 'var(--surface-3)', color: 'var(--text-primary)' }}
+            />
+            {cheatVoteCountInvalid && (
+              <p className="text-xs text-red-400">Please enter a non-negative whole number.</p>
+            )}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              className="rounded-xl"
+              style={{ background: 'var(--surface-3)', color: 'var(--text-primary)', borderColor: 'var(--border-subtle)' }}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault()
+                handleCheatModeSubmit()
+              }}
+              disabled={cheatSubmitting || parsedCheatVoteCount === null}
+              className="rounded-xl"
+              style={{ background: '#D97706', color: '#FFFFFF' }}
+            >
+              {cheatSubmitting ? 'Updating…' : 'Update Vote Count'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

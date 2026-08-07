@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
-import { Loader2, Sparkles, Zap, CheckCircle2, DollarSign } from 'lucide-react'
+import { Loader2, Sparkles, CheckCircle2, DollarSign, Smartphone, CreditCard } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -30,6 +30,17 @@ interface QuickVoteDialogProps {
     }
   } | null
   onVoted?: () => void
+}
+
+function getMethodIcon(iconName?: string) {
+  switch (iconName) {
+    case 'smartphone':
+      return Smartphone
+    case 'credit-card':
+      return CreditCard
+    default:
+      return CreditCard
+  }
 }
 
 export function QuickVoteDialog({
@@ -195,9 +206,18 @@ export function QuickVoteDialog({
               >
                 Amount to contribute
               </div>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-lg font-bold" style={{ color: '#F59E0B' }}>
-                  {paymentConfig?.currency || '$'}
+              <div
+                className="flex items-center rounded-xl focus-within:ring-2 focus-within:ring-gold-500/40"
+                style={{
+                  background: 'var(--surface-1)',
+                  border: '1px solid var(--border-subtle)',
+                }}
+              >
+                <span
+                  className="pl-4 pr-2 text-lg font-bold shrink-0 select-none"
+                  style={{ color: 'var(--text-muted)' }}
+                >
+                  {paymentConfig?.currency || 'USD'}
                 </span>
                 <input
                   type="number"
@@ -206,12 +226,8 @@ export function QuickVoteDialog({
                   placeholder="0.00"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
-                  className="w-full pl-8 pr-4 py-3 rounded-xl text-lg font-bold"
-                  style={{
-                    background: 'var(--surface-1)',
-                    border: '1px solid var(--border-subtle)',
-                    color: 'var(--text-primary)',
-                  }}
+                  className="w-full min-w-0 py-3 pr-4 text-lg font-bold bg-transparent border-0 outline-none"
+                  style={{ color: 'var(--text-primary)' }}
                 />
               </div>
               {effectiveAmount > 0 && (
@@ -237,22 +253,32 @@ export function QuickVoteDialog({
               <div className="grid grid-cols-2 gap-2">
                 {paymentMethods.slice(0, 6).map((m) => {
                   const selected = method?.id === m.id
+                  const Icon = getMethodIcon(m.iconName)
                   return (
                     <button
                       key={m.id}
                       type="button"
                       onClick={() => setMethod(m)}
-                      className={`rounded-xl px-3 py-2.5 text-left text-sm transition-all duration-200 hover-lift border ${
+                      className={`relative rounded-xl pl-3 pr-6 py-3 text-left text-sm transition-all duration-200 hover-lift ${
                         selected
-                          ? 'bg-gold-500/15 border-gold-500/40'
-                          : 'bg-surface border-border hover:border-border/60'
+                          ? 'bg-gold-500/20 border-2 border-gold-500'
+                          : 'bg-surface border border-border hover:border-border/60'
                       }`}
                       style={{ color: 'var(--text-primary)' }}
                     >
                       <div className="flex items-center gap-2">
-                        <span className="text-base">{m.iconName || '💳'}</span>
-                        <span className="font-medium truncate">{m.displayName}</span>
+                        <Icon
+                          className="size-4 shrink-0"
+                          style={{ color: selected ? '#F59E0B' : 'var(--text-muted)' }}
+                        />
+                        <span className="font-medium leading-tight">{m.displayName}</span>
                       </div>
+                      {selected && (
+                        <CheckCircle2
+                          className="absolute top-1.5 right-1.5 size-4"
+                          style={{ color: '#F59E0B' }}
+                        />
+                      )}
                     </button>
                   )
                 })}
@@ -278,7 +304,7 @@ export function QuickVoteDialog({
                 onBlur={() => {
                   if (phone) validatePhone(phone)
                 }}
-                className="w-full px-4 py-3 rounded-xl"
+                className="w-full px-4 py-3 rounded-xl placeholder:text-muted-foreground/50"
                 style={{
                   background: 'var(--surface-1)',
                   border: phoneError ? '1px solid #EF4444' : '1px solid var(--border-subtle)',
@@ -323,7 +349,7 @@ export function QuickVoteDialog({
               ) : (
                 <>
                   <Sparkles className="size-4 mr-2" />
-                  Pay {paymentConfig?.currency || '$'}{effectiveAmount.toFixed(2)}
+                  Pay {paymentConfig?.currency || 'USD'} {effectiveAmount.toFixed(2)}
                 </>
               )}
             </Button>
