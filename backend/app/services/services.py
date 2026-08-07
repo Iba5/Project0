@@ -903,6 +903,8 @@ class ParticipantService:
             category=part_in.category,
             video_url=part_in.video_url,
             image_url=part_in.image_url,
+            gallery_images=part_in.gallery_images,
+            banner_image_url=part_in.banner_image_url,
             bio=part_in.bio,
             status=part_in.status,
             votes=part_in.votes,

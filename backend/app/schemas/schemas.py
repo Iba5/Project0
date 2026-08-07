@@ -165,6 +165,17 @@ class EventResponse(EventBase):
 
 # --- Participant / Contestant Schemas ---
 
+def _validate_gallery_images(v: Optional[List[str]]) -> Optional[List[str]]:
+    """Shared gallery_images validator: when provided, must contain 1-5 image URLs."""
+    if v is None:
+        return v
+    if len(v) < 1:
+        raise ValueError("At least 1 gallery image is required when gallery_images is provided")
+    if len(v) > 5:
+        raise ValueError("At most 5 gallery images are allowed")
+    return v
+
+
 class ParticipantBase(CamelModel):
     """Common read-only fields shared by all participant schemas.
 
@@ -177,9 +188,16 @@ class ParticipantBase(CamelModel):
     category: str
     video_url: Optional[str] = None  # Optional promotional video
     image_url: Optional[str] = None  # Profile picture
+    gallery_images: Optional[List[str]] = None  # 1-5 image URLs, in display order
+    banner_image_url: Optional[str] = None  # Separate banner ("burner") image
     bio: Optional[str] = None  # Biography
     status: ContestantStatus = ContestantStatus.APPROVED
     votes: int = 0
+
+    @field_validator('gallery_images')
+    @classmethod
+    def validate_gallery_images(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        return _validate_gallery_images(v)
 
 class ParticipantCreate(ParticipantBase):
     event_id: str  # Required: every new participant must belong to an event
@@ -205,9 +223,16 @@ class ParticipantUpdate(CamelModel):
     category: Optional[str] = None
     video_url: Optional[str] = None
     image_url: Optional[str] = None
+    gallery_images: Optional[List[str]] = None
+    banner_image_url: Optional[str] = None
     bio: Optional[str] = None
     event_id: Optional[str] = None
     status: Optional[ContestantStatus] = None
+
+    @field_validator('gallery_images')
+    @classmethod
+    def validate_gallery_images(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        return _validate_gallery_images(v)
 
 # --- Payment Schemas ---
 

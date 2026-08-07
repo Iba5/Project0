@@ -293,6 +293,8 @@ export interface ParticipantItem {
   videoUrl: string | null
   imageUrl: string | null
   thumbnailUrl: string | null
+  galleryImages: string[] | null
+  bannerImageUrl: string | null
   bio: string | null
   status: string
   votes: number
@@ -474,6 +476,8 @@ export interface PublicParticipant {
   videoUrl: string
   imageUrl: string | null
   thumbnailUrl: string | null
+  galleryImages: string[] | null
+  bannerImageUrl: string | null
   bio: string | null
   votes: number
   createdAt: string

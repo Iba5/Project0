@@ -94,6 +94,8 @@ const participantSchema = z.object({
   bio: z.string().max(500, 'Bio must be less than 500 characters').optional(),
   eventId: z.string().min(1, 'Event is required'),
   imageUrl: z.string().optional(),
+  galleryImages: z.array(z.string()).max(5, 'At most 5 gallery images allowed').optional(),
+  bannerImageUrl: z.string().optional(),
 })
 
 type ParticipantFormValues = z.infer<typeof participantSchema>
@@ -119,13 +121,26 @@ function participantStatusBadge(status: string) {
   )
 }
 
+// Shared client-side validation for image uploads (Profile, Gallery, Banner)
+function validateImageFile(file: File): string | null {
+  if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) {
+    return 'Please select a PNG, JPEG, WebP, or GIF image'
+  }
+  if (file.size > 2 * 1024 * 1024) {
+    return 'Image must be 2 MB or smaller'
+  }
+  return null
+}
+
 // Shared form fields used by both Create and Edit dialogs
 function ParticipantFormFields({
   form,
   availableEvents,
+  mode,
 }: {
   form: UseFormReturn<ParticipantFormValues>
   availableEvents?: EventItem[]
+  mode: 'create' | 'edit'
 }) {
   const [uploading, setUploading] = useState(false)
   // imagePreview takes precedence (local data URL during upload), otherwise falls back to form imageUrl
@@ -139,13 +154,9 @@ function ParticipantFormFields({
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) {
-      toast.error('Please select a PNG, JPEG, WebP, or GIF image')
-      e.target.value = ''
-      return
-    }
-    if (file.size > 2 * 1024 * 1024) {
-      toast.error('Image must be 2 MB or smaller')
+    const validationError = validateImageFile(file)
+    if (validationError) {
+      toast.error(validationError)
       e.target.value = ''
       return
     }
@@ -181,6 +192,70 @@ function ParticipantFormFields({
     form.setValue('imageUrl', '')
     setImagePreview(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  // ─── Gallery Images (1-5) ────────────────────────────────────
+  const [galleryUploading, setGalleryUploading] = useState(false)
+  const galleryFileInputRef = useRef<HTMLInputElement>(null)
+  const galleryImages = form.watch('galleryImages') || []
+
+  const handleGalleryFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const validationError = validateImageFile(file)
+    if (validationError) {
+      toast.error(validationError)
+      e.target.value = ''
+      return
+    }
+    setGalleryUploading(true)
+    try {
+      const { url } = await uploadImage(file)
+      form.setValue('galleryImages', [...(form.getValues('galleryImages') || []), url])
+      toast.success('Gallery image uploaded')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to upload image')
+    } finally {
+      setGalleryUploading(false)
+      if (galleryFileInputRef.current) galleryFileInputRef.current.value = ''
+    }
+  }
+
+  const handleRemoveGalleryImage = (index: number) => {
+    const current = form.getValues('galleryImages') || []
+    form.setValue('galleryImages', current.filter((_, i) => i !== index))
+  }
+
+  // ─── Banner Image (separate from Profile Image / gallery) ───
+  const [bannerUploading, setBannerUploading] = useState(false)
+  const bannerFileInputRef = useRef<HTMLInputElement>(null)
+  const bannerImageUrl = form.watch('bannerImageUrl') || ''
+
+  const handleBannerFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const validationError = validateImageFile(file)
+    if (validationError) {
+      toast.error(validationError)
+      e.target.value = ''
+      return
+    }
+    setBannerUploading(true)
+    try {
+      const { url } = await uploadImage(file)
+      form.setValue('bannerImageUrl', url)
+      toast.success('Banner image uploaded')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to upload image')
+    } finally {
+      setBannerUploading(false)
+      if (bannerFileInputRef.current) bannerFileInputRef.current.value = ''
+    }
+  }
+
+  const handleRemoveBannerImage = () => {
+    form.setValue('bannerImageUrl', '')
+    if (bannerFileInputRef.current) bannerFileInputRef.current.value = ''
   }
 
   return (
@@ -252,6 +327,127 @@ function ParticipantFormFields({
         </div>
       </div>
 
+      {/* Gallery Images — 1-5 photos showcased on the public contestant page */}
+      <div className="space-y-2">
+        <Label style={{ color: 'var(--text-muted)' }}>Gallery Images</Label>
+        <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+          {galleryImages.map((url, idx) => (
+            <div
+              key={`${url}-${idx}`}
+              className="relative aspect-square rounded-lg overflow-hidden"
+              style={{ border: '1px solid var(--border-subtle)' }}
+            >
+              <img src={url} alt={`Gallery image ${idx + 1}`} className="w-full h-full object-cover" />
+              <button
+                type="button"
+                onClick={() => handleRemoveGalleryImage(idx)}
+                className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center"
+                style={{ background: 'rgba(0,0,0,0.6)' }}
+              >
+                <X className="w-3 h-3 text-white" />
+              </button>
+            </div>
+          ))}
+          {galleryImages.length < 5 && (
+            <button
+              type="button"
+              disabled={galleryUploading}
+              onClick={() => galleryFileInputRef.current?.click()}
+              className="aspect-square rounded-lg flex items-center justify-center"
+              style={{
+                background: 'var(--surface-3)',
+                border: '1px dashed var(--border-subtle)',
+              }}
+            >
+              {galleryUploading ? (
+                <Loader2 className="w-5 h-5 animate-spin" style={{ color: '#F59E0B' }} />
+              ) : (
+                <Upload className="w-5 h-5" style={{ color: 'var(--text-muted)' }} />
+              )}
+            </button>
+          )}
+        </div>
+        <input
+          ref={galleryFileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          className="hidden"
+          onChange={handleGalleryFileChange}
+        />
+        {form.formState.errors.galleryImages && (
+          <p className="text-xs text-red-400">{form.formState.errors.galleryImages.message as string}</p>
+        )}
+        <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+          {galleryImages.length}/5 images · PNG, JPEG, WebP, or GIF · max 2 MB each
+        </p>
+      </div>
+
+      {/* Banner Image — separate from Profile Image and the gallery grid above */}
+      <div
+        className="space-y-2 p-3 rounded-xl"
+        style={{ background: 'rgba(139,92,246,0.06)', border: '1px solid rgba(139,92,246,0.2)' }}
+      >
+        <Label style={{ color: 'var(--text-muted)' }}>Banner Image (Optional)</Label>
+        <p className="text-[11px] -mt-1" style={{ color: 'var(--text-muted)' }}>
+          A separate image, distinct from the profile picture and gallery.
+        </p>
+        <div className="flex items-center gap-4">
+          <div
+            className="relative w-28 h-16 rounded-lg overflow-hidden flex items-center justify-center shrink-0"
+            style={{
+              background: bannerImageUrl ? 'transparent' : 'var(--surface-3)',
+              border: '1px solid var(--border-subtle)',
+            }}
+          >
+            {bannerUploading ? (
+              <Loader2 className="w-5 h-5 animate-spin" style={{ color: '#8B5CF6' }} />
+            ) : bannerImageUrl ? (
+              <img src={bannerImageUrl} alt="Banner preview" className="w-full h-full object-cover" />
+            ) : (
+              <ImageIcon className="w-5 h-5" style={{ color: 'var(--text-muted)' }} />
+            )}
+          </div>
+          <div className="flex flex-col gap-2">
+            <input
+              ref={bannerFileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              className="hidden"
+              onChange={handleBannerFileChange}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={bannerUploading}
+              onClick={() => bannerFileInputRef.current?.click()}
+              className="rounded-full w-fit h-8"
+              style={{
+                borderColor: 'rgba(139,92,246,0.4)',
+                color: '#8B5CF6',
+                background: 'rgba(139,92,246,0.06)',
+              }}
+            >
+              <Upload className="w-3.5 h-3.5 mr-1.5" />
+              {bannerUploading ? 'Uploading…' : bannerImageUrl ? 'Change Banner' : 'Upload Banner'}
+            </Button>
+            {bannerImageUrl && !bannerUploading && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleRemoveBannerImage}
+                className="rounded-full w-fit h-7 text-xs"
+                style={{ color: '#EF4444' }}
+              >
+                <X className="w-3 h-3 mr-1.5" />
+                Remove
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+
       <div className="space-y-2">
         <Label style={{ color: 'var(--text-muted)' }}>Name</Label>
         <Input
@@ -288,30 +484,32 @@ function ParticipantFormFields({
         )}
       </div>
 
-      <div className="space-y-2">
-        <Label style={{ color: 'var(--text-muted)' }}>Event</Label>
-        <Select
-          value={form.watch('eventId')}
-          onValueChange={(val) => form.setValue('eventId', val)}
-        >
-          <SelectTrigger
-            className="rounded-xl border-none"
-            style={{ background: 'var(--surface-3)', color: 'var(--text-primary)' }}
+      {mode === 'create' && (
+        <div className="space-y-2">
+          <Label style={{ color: 'var(--text-muted)' }}>Event</Label>
+          <Select
+            value={form.watch('eventId')}
+            onValueChange={(val) => form.setValue('eventId', val)}
           >
-            <SelectValue placeholder="Select event" />
-          </SelectTrigger>
-          <SelectContent style={{ background: 'var(--surface-elevated)', color: 'var(--text-primary)' }}>
-            {availableEvents?.map((event) => (
-              <SelectItem key={event.id} value={event.id}>
-                {event.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {form.formState.errors.eventId && (
-          <p className="text-xs text-red-400">{form.formState.errors.eventId.message}</p>
-        )}
-      </div>
+            <SelectTrigger
+              className="rounded-xl border-none"
+              style={{ background: 'var(--surface-3)', color: 'var(--text-primary)' }}
+            >
+              <SelectValue placeholder="Select event" />
+            </SelectTrigger>
+            <SelectContent style={{ background: 'var(--surface-elevated)', color: 'var(--text-primary)' }}>
+              {availableEvents?.map((event) => (
+                <SelectItem key={event.id} value={event.id}>
+                  {event.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {form.formState.errors.eventId && (
+            <p className="text-xs text-red-400">{form.formState.errors.eventId.message}</p>
+          )}
+        </div>
+      )}
 
       <div className="space-y-2">
         <Label style={{ color: 'var(--text-muted)' }}>Video URL (Optional)</Label>
@@ -586,6 +784,8 @@ export function AdminParticipantsView() {
       bio: '',
       eventId: '',
       imageUrl: '',
+      galleryImages: [],
+      bannerImageUrl: '',
     },
   })
 
@@ -599,6 +799,8 @@ export function AdminParticipantsView() {
       bio: '',
       eventId: '',
       imageUrl: '',
+      galleryImages: [],
+      bannerImageUrl: '',
     },
   })
 
@@ -607,7 +809,14 @@ export function AdminParticipantsView() {
   const onCreateSubmit = async (values: ParticipantFormValues) => {
     setSubmitting(true)
     try {
-      const result = await createParticipant(values)
+      // Send null (not an empty array) for "no gallery images yet" — the
+      // backend validator only enforces 1-5 items when the field is present.
+      const payload = {
+        ...values,
+        galleryImages: values.galleryImages && values.galleryImages.length > 0 ? values.galleryImages : null,
+        bannerImageUrl: values.bannerImageUrl || null,
+      }
+      const result = await createParticipant(payload)
       toast.success('Participant created')
       
       // Generate event-specific link for the new contestant
@@ -632,7 +841,16 @@ export function AdminParticipantsView() {
     if (!editingParticipant) return
     setSubmitting(true)
     try {
-      const result = await updateParticipant(editingParticipant.id, values)
+      // Event is fixed at creation and not editable — omit eventId entirely
+      // rather than sending the unchanged value, so the backend can never
+      // accidentally change or null out the participant's event.
+      const { eventId, ...rest } = values
+      const payload = {
+        ...rest,
+        galleryImages: rest.galleryImages && rest.galleryImages.length > 0 ? rest.galleryImages : null,
+        bannerImageUrl: rest.bannerImageUrl || null,
+      }
+      const result = await updateParticipant(editingParticipant.id, payload)
       toast.success('Participant updated')
       setEditOpen(false)
       setEditingParticipant(null)
@@ -653,6 +871,8 @@ export function AdminParticipantsView() {
       bio: p.bio || '',
       eventId: p.eventId || '',
       imageUrl: p.imageUrl || '',
+      galleryImages: p.galleryImages || [],
+      bannerImageUrl: p.bannerImageUrl || '',
     })
     setEditOpen(true)
   }
@@ -1313,7 +1533,7 @@ export function AdminParticipantsView() {
             <DialogTitle style={{ color: 'var(--text-primary)' }}>Add Participant</DialogTitle>
           </DialogHeader>
           <form onSubmit={createForm.handleSubmit(onCreateSubmit)} className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
-            <ParticipantFormFields form={createForm} availableEvents={events} />
+            <ParticipantFormFields form={createForm} availableEvents={events} mode="create" />
             <DialogFooter>
               <Button
                 type="submit"
@@ -1344,7 +1564,7 @@ export function AdminParticipantsView() {
             <DialogTitle style={{ color: 'var(--text-primary)' }}>Edit Participant</DialogTitle>
           </DialogHeader>
           <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
-            <ParticipantFormFields form={editForm} availableEvents={events} />
+            <ParticipantFormFields form={editForm} availableEvents={events} mode="edit" />
             <DialogFooter>
               <Button
                 type="submit"

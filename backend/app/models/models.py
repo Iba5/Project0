@@ -102,6 +102,8 @@ class Participant(Base):
     category: Mapped[str] = mapped_column(String, nullable=False, index=True)  # Index for filtering
     video_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # Optional promotional video
     image_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # Profile picture
+    gallery_images: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)  # 1-5 image URLs, in display order
+    banner_image_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # Separate banner image
     bio: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Biography
     status: Mapped[ContestantStatus] = mapped_column(Enum(ContestantStatus, values_callable=lambda x: [e.value for e in x]), default=ContestantStatus.APPROVED, nullable=False, index=True)  # Index for status filtering
     votes: Mapped[int] = mapped_column(Integer, default=0, index=True)  # Index for leaderboard sorting

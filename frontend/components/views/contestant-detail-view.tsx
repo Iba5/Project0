@@ -436,17 +436,19 @@ export default function ContestantDetailView({ participantId }: { participantId:
               <h1 className="text-2xl sm:text-3xl md:text-5xl font-bold text-white mb-3 drop-shadow-lg truncate">
                 {participant.name}
               </h1>
-              <a
-                href={participant.videoUrl ?? undefined}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-block"
-              >
-                <Button className="bg-gold-500 hover:bg-gold-600 text-[#0B0F17] font-semibold rounded-full px-6 h-11 gold-glow-sm gap-2">
-                  <Play className="size-4" />
-                  Watch Performance
-                </Button>
-              </a>
+              {participant.videoUrl && (
+                <a
+                  href={participant.videoUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-block"
+                >
+                  <Button className="bg-gold-500 hover:bg-gold-600 text-[#0B0F17] font-semibold rounded-full px-6 h-11 gold-glow-sm gap-2">
+                    <Play className="size-4" />
+                    Watch Performance
+                  </Button>
+                </a>
+              )}
             </div>
           </div>
 
@@ -495,31 +497,51 @@ export default function ContestantDetailView({ participantId }: { participantId:
       {/* Content */}
       <main className="max-w-6xl mx-auto px-4 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Video Area */}
+          {/* Video Area + Gallery */}
           <motion.div
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.5 }}
+            className="space-y-4"
           >
-            <div className="dark-card rounded-2xl overflow-hidden">
-              {/* Video Player Placeholder */}
-              <div className="relative aspect-video bg-gradient-to-br from-surface-light to-surface flex items-center justify-center">
-                <div className="absolute inset-0 bg-gradient-to-br from-gold-500/5 via-transparent to-gold-600/5" />
+            {participant.videoUrl && (
+              <div className="dark-card rounded-2xl overflow-hidden">
+                {/* Video Player Placeholder */}
+                <div className="relative aspect-video bg-gradient-to-br from-surface-light to-surface flex items-center justify-center">
+                  <div className="absolute inset-0 bg-gradient-to-br from-gold-500/5 via-transparent to-gold-600/5" />
 
-                {/* Play button */}
-                <a
-                  href={participant.videoUrl ?? undefined}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="relative z-10"
-                >
-                  <div className="w-20 h-20 rounded-full bg-gold-500/90 flex items-center justify-center shadow-lg hover:bg-gold-500 transition-colors gold-glow-sm cursor-pointer group">
-                    <Play className="size-8 text-[#0B0F17] ml-1 group-hover:scale-110 transition-transform" />
-                  </div>
-                </a>
+                  {/* Play button */}
+                  <a
+                    href={participant.videoUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="relative z-10"
+                  >
+                    <div className="w-20 h-20 rounded-full bg-gold-500/90 flex items-center justify-center shadow-lg hover:bg-gold-500 transition-colors gold-glow-sm cursor-pointer group">
+                      <Play className="size-8 text-[#0B0F17] ml-1 group-hover:scale-110 transition-transform" />
+                    </div>
+                  </a>
 
+                </div>
               </div>
-            </div>
+            )}
+
+            {/* Gallery — reflows to however many images (1-5) are present */}
+            {participant.galleryImages && participant.galleryImages.length > 0 && (
+              <div
+                className={`grid gap-3 ${participant.galleryImages.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}
+              >
+                {participant.galleryImages.map((url, idx) => (
+                  <div key={`${url}-${idx}`} className="dark-card rounded-xl overflow-hidden aspect-square">
+                    <img
+                      src={url}
+                      alt={`${participant.name} gallery image ${idx + 1}`}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
           </motion.div>
 
           {/* Info Panel */}
