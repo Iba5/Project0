@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { Loader2, Sparkles, Zap, CheckCircle2, DollarSign } from 'lucide-react'
 import {
@@ -37,6 +38,7 @@ export function QuickVoteDialog({
   participant,
   onVoted,
 }: QuickVoteDialogProps) {
+  const router = useRouter()
   // No voter auth required — anyone can vote
   const [amount, setAmount] = useState<string>('')
   const [method, setMethod] = useState<PaymentMethod | null>(null)
@@ -44,10 +46,13 @@ export function QuickVoteDialog({
   const [processing, setProcessing] = useState(false)
   const [paymentInitiated, setPaymentInitiated] = useState(false)
   const [phoneError, setPhoneError] = useState<string | null>(null)
+  const [mobileInstructions, setMobileInstructions] = useState<string | null>(null)
+  const [paymentReference, setPaymentReference] = useState<string | null>(null)
   // Idempotency key — generated once per dialog open and reused on retries
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
 
   // Reset internal state whenever the dialog is (re)opened.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (open) {
       setAmount('')
@@ -56,17 +61,22 @@ export function QuickVoteDialog({
       setProcessing(false)
       setPaymentInitiated(false)
       setPhoneError(null)
+      setMobileInstructions(null)
+      setPaymentReference(null)
       // Generate a new idempotency key for each new dialog session
       setIdempotencyKey(crypto.randomUUID())
     }
   }, [open])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Default-select the first mobile money method for convenience.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!method && paymentMethods.length > 0) {
       setMethod(paymentMethods[0])
     }
   }, [method])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const effectiveAmount = parseFloat(amount) || 0
 
@@ -123,22 +133,36 @@ export function QuickVoteDialog({
 
         setPaymentInitiated(true)
 
-        toast.success(`Payment initiated for ${participant.name}!`, {
-          description: `Redirecting to Paynow...`,
-        })
-
         console.log("PAYMENT RESULT", result)
         console.log("Redirect URL", result.payment.paynowRedirectUrl)
 
-        if (!result.payment.paynowRedirectUrl) {
-          throw new Error("Payment gateway did not return a redirect URL.")
+        if (result.payment.paynowRedirectUrl) {
+          // Web/card payment method - redirect to Paynow
+          toast.success(`Payment initiated for ${participant.name}!`, {
+            description: `Redirecting to Paynow...`,
+          })
+
+          // Give the toast a brief moment to appear
+          setTimeout(() => {
+            window.location.href = result.payment.paynowRedirectUrl!
+          }, 800)
+        } else {
+          // Mobile money - no redirect URL, show instructions and navigate to status page
+          setMobileInstructions(result.payment.instructions || null)
+          setPaymentReference(result.payment.reference || null)
+
+          toast.success(`Payment initiated for ${participant.name}!`, {
+            description: `Check your phone for payment prompt. Reference: ${result.payment.reference}`,
+          })
+
+          // Navigate to payment status page after a short delay
+          setTimeout(() => {
+            if (result.payment.reference) {
+              router.push(`/payments/status?reference=${encodeURIComponent(result.payment.reference)}`)
+            }
+          }, 2000)
         }
 
-        // Give the toast a brief moment to appear
-        setTimeout(() => {
-          window.location.href = result.payment.paynowRedirectUrl!
-        }, 800)
-        
     } catch (err) {
       toast.error('Quick Vote failed', {
         description: err instanceof Error ? err.message : 'Please try again',
@@ -189,12 +213,37 @@ export function QuickVoteDialog({
               >
                 Payment Initiated
               </div>
-              <p
-                className="text-sm mt-1"
-                style={{ color: 'var(--text-muted)' }}
-              >
-                Complete payment in the Paynow window.
-              </p>
+              {mobileInstructions ? (
+                <>
+                  <p
+                    className="text-sm mt-1"
+                    style={{ color: 'var(--text-muted)' }}
+                  >
+                    {mobileInstructions}
+                  </p>
+                  {paymentReference && (
+                    <p
+                      className="text-xs mt-2"
+                      style={{ color: 'var(--text-muted)' }}
+                    >
+                      Reference: {paymentReference}
+                    </p>
+                  )}
+                  <p
+                    className="text-xs mt-2"
+                    style={{ color: 'var(--text-muted)' }}
+                  >
+                    Redirecting to payment status page...
+                  </p>
+                </>
+              ) : (
+                <p
+                  className="text-sm mt-1"
+                  style={{ color: 'var(--text-muted)' }}
+                >
+                  Complete payment in the Paynow window.
+                </p>
+              )}
               <p
                 className="text-xs mt-2"
                 style={{ color: 'var(--text-muted)' }}

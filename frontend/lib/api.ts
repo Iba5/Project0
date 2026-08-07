@@ -558,12 +558,12 @@ export async function initiatePayment(data: {
   amount: number
   paymentMethod: string
   contestantId: string
-  voterPhone?: string
+  voterPhone: string
   voterName?: string
   voterEmail?: string
   idempotencyKey: string
-}): Promise<{ payment: PaymentItem & { pollUrl: string | null; paynowRedirectUrl: string | null }; idempotent: boolean }> {
-  if (data.voterPhone && !validatePhone(data.voterPhone)) {
+}): Promise<{ payment: PaymentItem & { pollUrl: string | null; paynowRedirectUrl: string | null; instructions: string | null; reference: string }; idempotent: boolean }> {
+  if (!validatePhone(data.voterPhone)) {
     throw new Error('Invalid phone number format. Must be between 8 and 15 digits.')
   }
   return apiFetch('/payments', {
