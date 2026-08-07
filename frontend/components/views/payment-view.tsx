@@ -32,6 +32,7 @@ import {
   initiatePayment,
   getPaymentMethods,
   paymentMethods as fallbackPaymentMethods,
+  classifyPaymentError,
   type PaymentMethod,
 } from '@/lib/api'
 import { apiFetch } from '@/lib/api-client'
@@ -531,7 +532,7 @@ export default function PaymentView({ participantId }: { participantId: string }
       }
     } catch (err) {
       toast.error('Payment failed', {
-        description: err instanceof Error ? err.message : 'Please try again',
+        description: classifyPaymentError(err),
       })
     } finally {
       setProcessing(false)

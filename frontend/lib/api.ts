@@ -554,6 +554,41 @@ export function validatePhone(phone: string): boolean {
   return /^\d{8,15}$/.test(cleaned)
 }
 
+// Paynow's SDK returns free-text error strings we don't control and can't
+// enumerate. Only substrings we've actually observed in sandbox/production
+// are safe to reword and show to the user; anything else falls back to a
+// generic message (the real error is still console.error'd for developers).
+const KNOWN_PAYNOW_ERROR_MESSAGES: Array<{ match: string; userMessage: string }> = [
+  {
+    match: 'Insufficient balance',
+    userMessage:
+      "This wallet doesn't have enough balance for this payment. Try a different payment method or top up and try again.",
+  },
+]
+
+const GENERIC_PAYMENT_ERROR_MESSAGE = "Your payment couldn't be completed. Please try again."
+
+// Classifies a payment error for display to the user. Backend validation
+// messages (minimum amount, disabled method, rate limit, etc.) are already
+// clean and human-readable and pass through unchanged. Only messages that
+// look like a raw Paynow SDK passthrough ("Payment could not be initiated: ...")
+// are checked against the allowlist above and reworded or hidden.
+export function classifyPaymentError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err)
+
+  if (message.startsWith('Payment could not be initiated:')) {
+    const known = KNOWN_PAYNOW_ERROR_MESSAGES.find((entry) =>
+        message.toLowerCase().includes(entry.match.toLowerCase())
+      )
+    if (known) return known.userMessage
+
+    console.error('Unrecognized Paynow error:', message)
+    return GENERIC_PAYMENT_ERROR_MESSAGE
+  }
+
+  return message
+}
+
 export async function initiatePayment(data: {
   amount: number
   paymentMethod: string
